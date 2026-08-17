@@ -3,6 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs-darwin.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
@@ -10,12 +11,16 @@
     {
       self,
       nixpkgs,
+      nixpkgs-darwin,
       flake-utils,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        # Only x86_64-darwin (Intel Macs) needs the 26.05 branch; everything
+        # else (arm64 Macs, Linux) stays on nixpkgs-unstable.
+        nixpkgs' = if system == "x86_64-darwin" then nixpkgs-darwin else nixpkgs;
+        pkgs = nixpkgs'.legacyPackages.${system};
         inherit (pkgs) lib;
         python = pkgs.python312;
         pythonEnv = python.withPackages (ps: [
