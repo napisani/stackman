@@ -35,14 +35,18 @@ def merge_repo_records(
                 (survivor_id, bid),
             )
         else:
+            # Survivor keeps its own stack label if it has one; otherwise
+            # inherit the victim's (a branch has at most one stack label).
             conn.execute(
                 """
-                INSERT OR IGNORE INTO branch_stack_labels(branch_id, stack_id)
-                SELECT ?, stack_id FROM branch_stack_labels WHERE branch_id = ?
+                UPDATE branches SET stack_id = COALESCE(
+                    (SELECT stack_id FROM branches WHERE id = ?),
+                    (SELECT stack_id FROM branches WHERE id = ?)
+                )
+                WHERE id = ?
                 """,
-                (existing["id"], bid),
+                (existing["id"], bid, existing["id"]),
             )
-            conn.execute("DELETE FROM branch_stack_labels WHERE branch_id = ?", (bid,))
             conn.execute("DELETE FROM branches WHERE id = ?", (bid,))
     conn.execute("DELETE FROM repos WHERE id = ?", (victim_id,))
 

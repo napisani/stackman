@@ -27,6 +27,7 @@ class BranchRecord:
     branch_name: BranchName
     parent_branch_name: BranchName | None
     fork_point_sha: Sha
+    stack_id: StackId | None = None
     created_at: str | None = None
     updated_at: str | None = None
 

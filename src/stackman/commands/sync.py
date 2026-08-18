@@ -459,12 +459,6 @@ def _resolve_stack_id(ctx: AppContext, repo_key: str, branch_name: str) -> str:
             f"Branch {branch_name!r} is missing internal stack metadata. "
             "Run `stackman forget <branch>` and re-track it with `stackman track <branch> --parent <parent>`."
         )
-    if len(labels) > 1:
-        joined = ", ".join(labels)
-        raise SystemExit(
-            f"Branch {branch_name!r} has ambiguous internal stack metadata ({joined}). "
-            "Run `stackman forget <branch>` and re-track it with `stackman track <branch> --parent <parent>`."
-        )
     return labels[0]
 
 

@@ -32,7 +32,7 @@ def upsert_branch(
         row = conn.execute(
             """
             SELECT b.id, b.repo_id, r.root_path, b.branch_name,
-                   b.parent_branch_name, b.fork_point_sha,
+                   b.parent_branch_name, b.fork_point_sha, b.stack_id,
                    b.created_at, b.updated_at
             FROM branches AS b
             JOIN repos AS r ON r.id = b.repo_id
@@ -68,7 +68,7 @@ def update_branch_fork_point(
         row = conn.execute(
             """
             SELECT b.id, b.repo_id, r.root_path, b.branch_name,
-                   b.parent_branch_name, b.fork_point_sha,
+                   b.parent_branch_name, b.fork_point_sha, b.stack_id,
                    b.created_at, b.updated_at
             FROM branches AS b
             JOIN repos AS r ON r.id = b.repo_id
@@ -85,7 +85,7 @@ def get_branch(db_path: Path | str, repo_root: Path | str, branch_name: str) -> 
         row = conn.execute(
             """
             SELECT b.id, b.repo_id, r.root_path, b.branch_name,
-                   b.parent_branch_name, b.fork_point_sha,
+                   b.parent_branch_name, b.fork_point_sha, b.stack_id,
                    b.created_at, b.updated_at
             FROM branches AS b
             JOIN repos AS r ON r.id = b.repo_id
@@ -102,7 +102,7 @@ def list_branches(db_path: Path | str, repo_root: Path | str) -> list[BranchReco
         rows = conn.execute(
             """
             SELECT b.id, b.repo_id, r.root_path, b.branch_name,
-                   b.parent_branch_name, b.fork_point_sha,
+                   b.parent_branch_name, b.fork_point_sha, b.stack_id,
                    b.created_at, b.updated_at
             FROM branches AS b
             JOIN repos AS r ON r.id = b.repo_id
@@ -120,7 +120,7 @@ def list_all_branches(db_path: Path | str) -> list[BranchRecord]:
         rows = conn.execute(
             """
             SELECT b.id, b.repo_id, r.root_path, b.branch_name,
-                   b.parent_branch_name, b.fork_point_sha,
+                   b.parent_branch_name, b.fork_point_sha, b.stack_id,
                    b.created_at, b.updated_at
             FROM branches AS b
             JOIN repos AS r ON r.id = b.repo_id
@@ -138,7 +138,7 @@ def list_branches_with_parent(
         rows = conn.execute(
             """
             SELECT b.id, b.repo_id, r.root_path, b.branch_name,
-                   b.parent_branch_name, b.fork_point_sha,
+                   b.parent_branch_name, b.fork_point_sha, b.stack_id,
                    b.created_at, b.updated_at
             FROM branches AS b
             JOIN repos AS r ON r.id = b.repo_id
@@ -223,5 +223,8 @@ def delete_all_branches_global(db_path: Path | str) -> int:
 
 
 def _delete_orphaned_stacks(conn) -> None:
-    """Drop stack rows that no branch references anymore (labels cascade on branch delete)."""
-    conn.execute("DELETE FROM stacks WHERE id NOT IN (SELECT stack_id FROM branch_stack_labels)")
+    """Drop stack rows that no branch references anymore."""
+    conn.execute(
+        "DELETE FROM stacks WHERE id NOT IN "
+        "(SELECT stack_id FROM branches WHERE stack_id IS NOT NULL)"
+    )

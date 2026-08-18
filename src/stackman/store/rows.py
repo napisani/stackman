@@ -15,6 +15,7 @@ def branch_from_row(row: sqlite3.Row | None) -> BranchRecord:
     if row is None:
         raise LookupError("Expected branch row")
     parent = row["parent_branch_name"]
+    stack_id = row["stack_id"]
     return BranchRecord(
         id=row["id"],
         repo_id=row["repo_id"],
@@ -22,6 +23,7 @@ def branch_from_row(row: sqlite3.Row | None) -> BranchRecord:
         branch_name=BranchName(row["branch_name"]),
         parent_branch_name=BranchName(parent) if parent is not None else None,
         fork_point_sha=Sha(row["fork_point_sha"]),
+        stack_id=StackId(stack_id) if stack_id is not None else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
