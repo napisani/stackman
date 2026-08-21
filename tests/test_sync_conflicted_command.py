@@ -81,6 +81,7 @@ def test_sync_conflicted_probe_error_does_not_pull_the_invoking_branch(
     subprocess.run(
         ["git", "clone", str(remote), str(updater)], check=True, capture_output=True, text=True
     )
+    subprocess.run(["git", "-C", str(updater), "checkout", "main"], check=True)
     subprocess.run(["git", "-C", str(updater), "config", "user.name", "Stackman Test"], check=True)
     subprocess.run(
         ["git", "-C", str(updater), "config", "user.email", "stackman@example.com"], check=True
