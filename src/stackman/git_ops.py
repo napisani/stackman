@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -9,7 +10,18 @@ def _run_git(
     cwd: Path,
     *args: str,
     check: bool = True,
+    non_interactive: bool = False,
 ) -> subprocess.CompletedProcess[str]:
+    if non_interactive:
+        return subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            check=check,
+            capture_output=True,
+            text=True,
+            env=os.environ | {"GIT_TERMINAL_PROMPT": "0"},
+            stdin=subprocess.DEVNULL,
+        )
     return subprocess.run(
         ["git", *args],
         cwd=cwd,
@@ -135,16 +147,13 @@ def rebase_onto(
     *,
     onto: str,
     upstream: str,
+    update_refs: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     """Run `git rebase --onto onto upstream` on the current branch (non-interactive)."""
-    return _run_git(
-        cwd,
-        "rebase",
-        "--onto",
-        onto,
-        upstream,
-        check=False,
-    )
+    args = ("rebase", "--onto", onto, upstream)
+    if not update_refs:
+        args = ("-c", "rebase.updateRefs=false", *args)
+    return _run_git(cwd, *args, check=False)
 
 
 def commits_since(cwd: Path, upstream: str, *, ref: str = "HEAD") -> list[str]:
@@ -205,7 +214,7 @@ def has_remote(cwd: Path, remote: str) -> bool:
 
 def fetch_remote(cwd: Path, remote: str) -> subprocess.CompletedProcess[str]:
     """Fetch the latest remote-tracking refs without touching the worktree."""
-    return _run_git(cwd, "fetch", remote, check=False)
+    return _run_git(cwd, "fetch", remote, check=False, non_interactive=True)
 
 
 def pull_ff_only(cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -310,6 +319,31 @@ def get_pr_number(cwd: Path, branch: str) -> int | None:
         return int(pr_number) if pr_number is not None else None
     except Exception:
         return None
+
+
+def create_detached_worktree(
+    repo_root: Path, worktree_path: Path, ref: str
+) -> subprocess.CompletedProcess[str]:
+    """Create a disposable detached worktree at ``ref`` without moving a branch."""
+    ensure_ref_name_safe(ref)
+    return _run_git(repo_root, "worktree", "add", "--detach", str(worktree_path), ref, check=False)
+
+
+def checkout_detached(cwd: Path, ref: str) -> subprocess.CompletedProcess[str]:
+    """Reset a disposable worktree to a detached ref before an isolated probe."""
+    ensure_ref_name_safe(ref)
+    return _run_git(cwd, "checkout", "--detach", ref, check=False)
+
+
+def abort_rebase(cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Abort an isolated predictive rebase, restoring its detached worktree."""
+    return _run_git(cwd, "rebase", "--abort", check=False)
+
+
+def conflicted_files(cwd: Path) -> list[str]:
+    """Return unmerged paths from an in-progress merge or rebase."""
+    output = _run_git(cwd, "diff", "--name-only", "--diff-filter=U", check=False).stdout
+    return [line for line in output.splitlines() if line]
 
 
 def create_branch_worktree(

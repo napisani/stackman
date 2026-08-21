@@ -41,6 +41,9 @@ stackman list
 # └── feature
 #     └── feature-2
 
+# Predict which tracked stacks would hit a rebase conflict
+stackman conflicts
+
 # Rebase every branch in the stack onto its parent's latest tip
 stackman sync
 
@@ -85,6 +88,10 @@ Record an existing linear stack in one call. `ANCHOR` is not tracked; every late
 stackman chain main a b c
 # Tracked stack chain 'main' -> 'a' -> 'b' -> 'c'.
 ```
+
+### `stackman conflicts`
+
+Predict rebase conflicts across every tracked stack without moving local branches. Stackman probes each stack in a disposable detached worktree and reports the first conflicting branch and files. By default it best-effort fetches `origin` to test against the latest remote anchor; use `--no-fetch-and-pull` to use existing local refs. Exit status is `0` when all stacks are clean, `1` when a conflict is predicted, and `2` when a probe cannot run. Pass `--json` to report every stack result for automation.
 
 ### `stackman sync [BRANCH]`
 

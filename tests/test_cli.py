@@ -10,7 +10,17 @@ def test_click_cli_help_shows_only_branch_first_commands() -> None:
 
     assert result.exit_code == 0
     assert "Manage stacked Git branches." in result.output
-    for command in ("track", "chain", "sync", "done", "list", "forget", "gh", "status"):
+    for command in (
+        "track",
+        "chain",
+        "conflicts",
+        "sync",
+        "done",
+        "list",
+        "forget",
+        "gh",
+        "status",
+    ):
         assert command in result.output
     for legacy in ("init", "merged", "stacks"):
         assert legacy not in result.output
@@ -35,6 +45,14 @@ def test_chain_command_help() -> None:
     assert "BRANCHES" in result.output
     assert "--branches" not in result.output
     assert "--stack" not in result.output
+
+
+def test_conflicts_command_help() -> None:
+    result = CliRunner().invoke(cli, ["conflicts", "--help"])
+
+    assert result.exit_code == 0
+    assert "--json" in result.output
+    assert "--no-fetch-and-pull" in result.output
 
 
 def test_sync_command_help() -> None:

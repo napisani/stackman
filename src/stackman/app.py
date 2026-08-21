@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
-from .commands import discover, done, forget, listing, runner, status, sync, track
+from .commands import conflicts, discover, done, forget, listing, runner, status, sync, track
 from .context import AppContext
 
 
@@ -44,6 +44,11 @@ class StackmanApp:
 
     def chain(self, *, anchor: str, branches: Sequence[str]) -> int:
         return self._run(lambda c: track.run_chain(c, anchor=anchor, branches=branches))
+
+    def conflicts(self, *, as_json: bool = False, no_fetch_and_pull: bool = False) -> int:
+        return self._run(
+            lambda c: conflicts.run(c, as_json=as_json, no_fetch_and_pull=no_fetch_and_pull)
+        )
 
     def sync(
         self,

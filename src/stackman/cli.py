@@ -141,6 +141,7 @@ def cli(ctx: click.Context, db_path: Path, repo_path: Path | None) -> None:
       stackman track --parent main          # track the current branch onto main
       stackman chain main a b c             # record an existing linear stack
       stackman list                         # show the stack tree for this repo
+      stackman conflicts                    # predict rebases that would conflict
       stackman sync feature                 # rebase the whole stack containing 'feature'
       stackman done feature                 # feature landed; lift its children up
       stackman forget --all                 # drop all tracking for this repo
@@ -178,6 +179,23 @@ def chain(cfg: CliConfig, anchor: str, branches: tuple[str, ...], db_path, repo_
     """Track an existing linear chain: ANCHOR BRANCH..."""
     app = cfg.resolve(db_path, repo_path)
     raise SystemExit(app.chain(anchor=anchor, branches=branches))
+
+
+@cli.command("conflicts")
+@click.option("--json", "as_json", is_flag=True, help="Write every stack result as JSON.")
+@click.option(
+    "--no-fetch-and-pull",
+    is_flag=True,
+    help="Skip the best-effort origin fetch before probing.",
+)
+@repo_options
+@click.pass_obj
+def conflicts_command(
+    cfg: CliConfig, as_json: bool, no_fetch_and_pull: bool, db_path, repo_path
+) -> None:
+    """Predict rebase conflicts across every tracked stack in this repository."""
+    app = cfg.resolve(db_path, repo_path)
+    raise SystemExit(app.conflicts(as_json=as_json, no_fetch_and_pull=no_fetch_and_pull))
 
 
 @cli.command("sync")
