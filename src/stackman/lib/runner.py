@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Callable
 
-from ..context import AppContext
+from .context import AppContext
 
 
 def run_safely(ctx: AppContext, fn: Callable[[AppContext], int]) -> int:

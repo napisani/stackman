@@ -5,9 +5,9 @@ import json
 
 from click.testing import CliRunner
 
-from stackman.app import StackmanApp
 from stackman.cli import cli
-from stackman.store import get_branch, initialize, label_branch, upsert_branch
+from stackman.commands.app import StackmanApp
+from stackman.lib.store import get_branch, initialize, label_branch, upsert_branch
 
 
 def _track_ab(git_repo, stackman_db_path):

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import io
 
-from stackman.app import StackmanApp
-from stackman.store import get_branch, get_stack, initialize, list_branch_labels
+from stackman.commands.app import StackmanApp
+from stackman.lib.store import get_branch, get_stack, initialize, list_branch_labels
 
 
 def _app(git_repo, stackman_db_path, *, stack_id_factory=None, stdout=None) -> StackmanApp:

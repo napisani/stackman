@@ -97,7 +97,7 @@ class GitRepoFixture:
 
     def canonical_repo_key(self) -> str:
         """Stable ``repos.root_path`` value (shared across linked worktrees)."""
-        from stackman.git_ops import repo_db_key
+        from stackman.lib.git_ops import repo_db_key
 
         return repo_db_key(self.root)
 

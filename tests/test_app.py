@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def test_stackman_app_boundary_uses_injected_environment(tmp_path: Path) -> None:
-    from stackman.app import StackmanApp
+    from stackman.commands.app import StackmanApp
 
     stdout = io.StringIO()
     stderr = io.StringIO()

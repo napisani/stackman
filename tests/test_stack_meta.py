@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import io
 
-from stackman.app import StackmanApp
-from stackman.store import initialize, label_branch, upsert_branch
+from stackman.commands.app import StackmanApp
+from stackman.lib.store import initialize, label_branch, upsert_branch
 
 
 def test_list_shows_repo_local_tracked_branches(git_repo, stackman_db_path) -> None:

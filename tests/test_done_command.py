@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import io
 
-from stackman.app import StackmanApp
-from stackman.store import get_branch, initialize, upsert_branch
+from stackman.commands.app import StackmanApp
+from stackman.lib.store import get_branch, initialize, upsert_branch
 
 
 def test_done_reparents_children_and_removes_branch(git_repo, stackman_db_path) -> None:

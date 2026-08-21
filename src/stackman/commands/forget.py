@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from ..context import AppContext
-from ..git_ops import format_repo_key_for_display, repo_db_key
-from ..store import (
+from ..lib.command_support import resolve_repo
+from ..lib.context import AppContext
+from ..lib.git_ops import format_repo_key_for_display, repo_db_key
+from ..lib.store import (
     delete_all_branches,
     delete_all_branches_global,
     delete_branch,
@@ -14,7 +15,6 @@ from ..store import (
     list_branches,
     list_branches_with_parent,
 )
-from .shared import resolve_repo
 
 
 def run(ctx: AppContext, *, branch: str | None) -> int:

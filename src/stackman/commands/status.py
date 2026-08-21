@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 
-from ..context import AppContext
-from ..git_ops import branch_exists, format_repo_key_for_display
-from ..store import get_branch
-from .shared import resolve_repo
+from ..lib.command_support import resolve_repo
+from ..lib.context import AppContext
+from ..lib.git_ops import branch_exists, format_repo_key_for_display
+from ..lib.store import get_branch
 
 
 def run(ctx: AppContext, *, branch: str | None = None, as_json: bool = False) -> int:

@@ -4,11 +4,11 @@ import json
 import os
 from collections import defaultdict
 
-from ..context import AppContext
-from ..git_ops import current_branch, format_repo_key_for_display
-from ..models import BranchRecord
-from ..store import list_branches
-from .shared import descendant_lines, resolve_repo
+from ..lib.command_support import descendant_lines, resolve_repo
+from ..lib.context import AppContext
+from ..lib.git_ops import current_branch, format_repo_key_for_display
+from ..lib.models import BranchRecord
+from ..lib.store import list_branches
 
 _BOLD = "\033[1m"
 _DIM = "\033[2m"

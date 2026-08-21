@@ -4,10 +4,9 @@ import io
 import json
 import subprocess
 
-from stackman import git_ops
-from stackman.app import StackmanApp
-from stackman.commands import conflicts
-from stackman.store import initialize, label_branch, upsert_branch
+from stackman.commands.app import StackmanApp
+from stackman.lib import conflict_prediction, git_ops
+from stackman.lib.store import initialize, label_branch, upsert_branch
 
 
 def test_conflicts_reports_a_predicted_rebase_conflict_without_rewriting_branches(
@@ -166,7 +165,7 @@ def test_conflicts_reports_probe_setup_errors_as_json(
     git_repo.commit("feature work", filename="feature.txt", content="feature\n")
     fork = git_repo.merge_base("feature", "main")
     _track_branch(stackman_db_path, git_repo, "feature", "main", fork, "stack-setup-error")
-    monkeypatch.setattr(conflicts.tempfile, "mkdtemp", _raise_permission_denied)
+    monkeypatch.setattr(conflict_prediction.tempfile, "mkdtemp", _raise_permission_denied)
 
     app, stdout, _ = _app(git_repo, stackman_db_path)
 
@@ -199,13 +198,13 @@ def test_conflicts_reports_failed_probe_cleanup(
     git_repo.commit("feature work", filename="feature.txt", content="feature\n")
     fork = git_repo.merge_base("feature", "main")
     _track_branch(stackman_db_path, git_repo, "feature", "main", fork, "stack-cleanup-error")
-    real_remove_worktree = conflicts.remove_worktree
+    real_remove_worktree = conflict_prediction.remove_worktree
 
     def remove_then_report_failure(repo_root, worktree_path):
         real_remove_worktree(repo_root, worktree_path)
         return subprocess.CompletedProcess([], 1, "", "remove failed")
 
-    monkeypatch.setattr(conflicts, "remove_worktree", remove_then_report_failure)
+    monkeypatch.setattr(conflict_prediction, "remove_worktree", remove_then_report_failure)
     app, stdout, _ = _app(git_repo, stackman_db_path)
 
     assert app.conflicts() == 2

@@ -14,6 +14,7 @@ def test_click_cli_help_shows_only_branch_first_commands() -> None:
         "track",
         "chain",
         "conflicts",
+        "sync-conflicted",
         "sync",
         "done",
         "list",
@@ -53,6 +54,23 @@ def test_conflicts_command_help() -> None:
     assert result.exit_code == 0
     assert "--json" in result.output
     assert "--no-fetch-and-pull" in result.output
+
+
+def test_sync_conflicted_command_help() -> None:
+    result = CliRunner().invoke(cli, ["sync-conflicted", "--help"])
+
+    assert result.exit_code == 0
+    for option in (
+        "--dry-run",
+        "--verbose",
+        "--squash",
+        "--allow-dirty",
+        "--no-fetch-and-pull",
+        "--resolver",
+        "--no-wait",
+    ):
+        assert option in result.output
+    assert "BRANCH" not in result.output
 
 
 def test_sync_command_help() -> None:

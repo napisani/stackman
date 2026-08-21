@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from stackman.stack_ids import new_auto_stack_id
+from stackman.lib.stack_ids import new_auto_stack_id
 
 
 def test_new_auto_stack_id_shape_and_uniqueness() -> None:

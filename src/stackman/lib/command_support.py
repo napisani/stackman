@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from ..context import AppContext
-from ..git_ops import current_branch, repo_db_key, repo_root
-from ..store import initialize
+from .context import AppContext
+from .git_ops import current_branch, repo_db_key, repo_root
+from .store import initialize
 
 
 def emit(ctx: AppContext, message: str) -> None:

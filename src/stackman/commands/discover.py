@@ -7,9 +7,9 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..context import AppContext
-from ..git_ops import branch_exists, repo_root
-from .shared import descendant_lines
+from ..lib.command_support import descendant_lines
+from ..lib.context import AppContext
+from ..lib.git_ops import branch_exists, repo_root
 from .track import run_track
 
 _GH_PR_FIELDS = "headRefName,baseRefName,number,title,url,state"

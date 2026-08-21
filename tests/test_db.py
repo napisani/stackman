@@ -13,7 +13,7 @@ if "stackman" not in sys.modules:
     package.__path__ = [str(SRC_DIR / "stackman")]
     sys.modules["stackman"] = package
 
-from stackman.store import (
+from stackman.lib.store import (
     create_stack,
     get_branch,
     get_stack,
@@ -131,7 +131,7 @@ def test_migrating_v1_branch_stack_labels_join_table(tmp_path: Path) -> None:
     """
     import sqlite3
 
-    from stackman.store.connection import normalize_path
+    from stackman.lib.store.connection import normalize_path
 
     db_path = tmp_path / "stackman.db"
     repo_root = tmp_path / "repo"

@@ -3,7 +3,7 @@
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _pkg_version
 
-from .app import StackmanApp
+from .commands.app import StackmanApp
 
 try:
     __version__ = _pkg_version("stackman")

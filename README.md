@@ -44,6 +44,9 @@ stackman list
 # Predict which tracked stacks would hit a rebase conflict
 stackman conflicts
 
+# Sync every tracked stack whose predictive probe finds a conflict
+stackman sync-conflicted
+
 # Rebase every branch in the stack onto its parent's latest tip
 stackman sync
 
@@ -92,6 +95,10 @@ stackman chain main a b c
 ### `stackman conflicts`
 
 Predict rebase conflicts across every tracked stack without moving local branches. Stackman probes each stack in a disposable detached worktree and reports the first conflicting branch and files. By default it best-effort fetches `origin` to test against the latest remote anchor; use `--no-fetch-and-pull` to use existing local refs. Exit status is `0` when all stacks are clean, `1` when a conflict is predicted, and `2` when a probe cannot run. Pass `--json` to report every stack result for automation.
+
+### `stackman sync-conflicted`
+
+Probe every tracked stack, then sync each stack predicted to conflict. Probing finishes before any sync begins: if a probe cannot run, Stackman exits `2` without changing branches. It then preflights every selected stack and syncs them in deterministic stack order, stopping on the first sync failure. It accepts every named option supported by `sync`; there is no positional branch because it always scans every stack.
 
 ### `stackman sync [BRANCH]`
 

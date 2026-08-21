@@ -3,12 +3,12 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from stackman.app import StackmanApp
-from stackman.commands.runner import run_safely
-from stackman.context import AppContext
-from stackman.store import initialize, list_branch_labels
-from stackman.store.connection import connect, normalize_path
-from stackman.store.repos import merge_repo_records, migrate_repo_roots_to_git_common_dir
+from stackman.commands.app import StackmanApp
+from stackman.lib.context import AppContext
+from stackman.lib.runner import run_safely
+from stackman.lib.store import initialize, list_branch_labels
+from stackman.lib.store.connection import connect, normalize_path
+from stackman.lib.store.repos import merge_repo_records, migrate_repo_roots_to_git_common_dir
 
 # --- F6: XDG_DATA_HOME ------------------------------------------------------
 

@@ -6,9 +6,9 @@ import io
 from pathlib import Path
 from unittest.mock import patch
 
-from stackman.conflict_resolver import RebaseConflictResolution, RebaseConflictValidator
-from stackman.context import AppContext
-from stackman.models import ConflictResolutionResult
+from stackman.lib.conflict_resolver import RebaseConflictResolution, RebaseConflictValidator
+from stackman.lib.context import AppContext
+from stackman.lib.models import ConflictResolutionResult
 
 
 class TestRebaseConflictValidator:
@@ -18,35 +18,35 @@ class TestRebaseConflictValidator:
         """Test detecting when rebase is still in progress."""
         validator = RebaseConflictValidator(Path("/tmp/repo"), "abc123")
 
-        with patch("stackman.conflict_resolver.rebase_in_progress", return_value=True):
+        with patch("stackman.lib.conflict_resolver.rebase_in_progress", return_value=True):
             assert validator.is_rebase_in_progress() is True
 
     def test_is_rebase_in_progress_false(self) -> None:
         """Test detecting when rebase is not in progress."""
         validator = RebaseConflictValidator(Path("/tmp/repo"), "abc123")
 
-        with patch("stackman.conflict_resolver.rebase_in_progress", return_value=False):
+        with patch("stackman.lib.conflict_resolver.rebase_in_progress", return_value=False):
             assert validator.is_rebase_in_progress() is False
 
     def test_is_rebase_complete_true(self) -> None:
         """Test detecting when rebase completed (HEAD at target)."""
         validator = RebaseConflictValidator(Path("/tmp/repo"), "abc123")
 
-        with patch("stackman.conflict_resolver.is_ancestor", return_value=True):
+        with patch("stackman.lib.conflict_resolver.is_ancestor", return_value=True):
             assert validator.is_rebase_complete() is True
 
     def test_is_rebase_complete_false(self) -> None:
         """Test detecting when rebase did not complete."""
         validator = RebaseConflictValidator(Path("/tmp/repo"), "abc123")
 
-        with patch("stackman.conflict_resolver.is_ancestor", return_value=False):
+        with patch("stackman.lib.conflict_resolver.is_ancestor", return_value=False):
             assert validator.is_rebase_complete() is False
 
     def test_working_tree_status_clean(self) -> None:
         """Test detecting clean working tree."""
         validator = RebaseConflictValidator(Path("/tmp/repo"), "abc123")
 
-        with patch("stackman.conflict_resolver.worktree_dirty_preview", return_value=None):
+        with patch("stackman.lib.conflict_resolver.worktree_dirty_preview", return_value=None):
             assert validator.working_tree_status() is None
             assert validator.is_working_tree_clean() is True
 
@@ -55,7 +55,9 @@ class TestRebaseConflictValidator:
         validator = RebaseConflictValidator(Path("/tmp/repo"), "abc123")
         dirty_preview = " M file.txt"
 
-        with patch("stackman.conflict_resolver.worktree_dirty_preview", return_value=dirty_preview):
+        with patch(
+            "stackman.lib.conflict_resolver.worktree_dirty_preview", return_value=dirty_preview
+        ):
             assert validator.working_tree_status() == dirty_preview
             assert validator.is_working_tree_clean() is False
 
@@ -64,9 +66,9 @@ class TestRebaseConflictValidator:
         validator = RebaseConflictValidator(Path("/tmp/repo"), "abc123")
 
         with (
-            patch("stackman.conflict_resolver.rebase_in_progress", return_value=False),
-            patch("stackman.conflict_resolver.is_ancestor", return_value=True),
-            patch("stackman.conflict_resolver.worktree_dirty_preview", return_value=None),
+            patch("stackman.lib.conflict_resolver.rebase_in_progress", return_value=False),
+            patch("stackman.lib.conflict_resolver.is_ancestor", return_value=True),
+            patch("stackman.lib.conflict_resolver.worktree_dirty_preview", return_value=None),
         ):
             success, error_msg = validator.validate_rebase_success()
             assert success is True
@@ -76,7 +78,7 @@ class TestRebaseConflictValidator:
         """Test validation fails when rebase is still in progress."""
         validator = RebaseConflictValidator(Path("/tmp/repo"), "abc123")
 
-        with patch("stackman.conflict_resolver.rebase_in_progress", return_value=True):
+        with patch("stackman.lib.conflict_resolver.rebase_in_progress", return_value=True):
             success, error_msg = validator.validate_rebase_success()
             assert success is False
             assert "still in progress" in error_msg.lower()
@@ -86,8 +88,8 @@ class TestRebaseConflictValidator:
         validator = RebaseConflictValidator(Path("/tmp/repo"), "abc123")
 
         with (
-            patch("stackman.conflict_resolver.rebase_in_progress", return_value=False),
-            patch("stackman.conflict_resolver.is_ancestor", return_value=False),
+            patch("stackman.lib.conflict_resolver.rebase_in_progress", return_value=False),
+            patch("stackman.lib.conflict_resolver.is_ancestor", return_value=False),
         ):
             success, error_msg = validator.validate_rebase_success()
             assert success is False
@@ -100,9 +102,11 @@ class TestRebaseConflictValidator:
         validator = RebaseConflictValidator(Path("/tmp/repo"), "abc123")
 
         with (
-            patch("stackman.conflict_resolver.rebase_in_progress", return_value=False),
-            patch("stackman.conflict_resolver.is_ancestor", return_value=True),
-            patch("stackman.conflict_resolver.worktree_dirty_preview", return_value=" M file.txt"),
+            patch("stackman.lib.conflict_resolver.rebase_in_progress", return_value=False),
+            patch("stackman.lib.conflict_resolver.is_ancestor", return_value=True),
+            patch(
+                "stackman.lib.conflict_resolver.worktree_dirty_preview", return_value=" M file.txt"
+            ),
         ):
             success, error_msg = validator.validate_rebase_success()
             assert success is False
@@ -113,7 +117,7 @@ class TestRebaseConflictValidator:
         validator = RebaseConflictValidator(Path("/tmp/repo"), "abc123")
 
         # If rebase is still in progress, we don't need to check other conditions
-        with patch("stackman.conflict_resolver.rebase_in_progress", return_value=True):
+        with patch("stackman.lib.conflict_resolver.rebase_in_progress", return_value=True):
             success, error_msg = validator.validate_rebase_success()
             assert success is False
             # Error message should be about rebase in progress, not about tree state
@@ -138,7 +142,7 @@ class TestRebaseConflictResolution:
         ctx = self._make_context()
         ctx.stdin = io.StringIO("")  # Has readline method
 
-        from stackman.conflict_resolver import RebaseConflictContext
+        from stackman.lib.conflict_resolver import RebaseConflictContext
 
         conflict_ctx = RebaseConflictContext(
             branch_name="feature",
@@ -156,7 +160,7 @@ class TestRebaseConflictResolution:
         ctx = self._make_context()
         ctx.stdin = io.StringIO("")
 
-        from stackman.conflict_resolver import RebaseConflictContext
+        from stackman.lib.conflict_resolver import RebaseConflictContext
 
         conflict_ctx = RebaseConflictContext(
             branch_name="feature",
@@ -174,7 +178,7 @@ class TestRebaseConflictResolution:
         ctx = self._make_context()
         ctx.stdin = None  # No readline method
 
-        from stackman.conflict_resolver import RebaseConflictContext
+        from stackman.lib.conflict_resolver import RebaseConflictContext
 
         conflict_ctx = RebaseConflictContext(
             branch_name="feature",
@@ -192,7 +196,7 @@ class TestRebaseConflictResolution:
         ctx = self._make_context()
         ctx.stdin = None  # No stdin
 
-        from stackman.conflict_resolver import RebaseConflictContext
+        from stackman.lib.conflict_resolver import RebaseConflictContext
 
         conflict_ctx = RebaseConflictContext(
             branch_name="feature",
@@ -214,7 +218,7 @@ class TestRebaseConflictResolution:
         ctx = self._make_context()
         ctx.stdin = io.StringIO("\n")  # User just presses Enter
 
-        from stackman.conflict_resolver import RebaseConflictContext
+        from stackman.lib.conflict_resolver import RebaseConflictContext
 
         conflict_ctx = RebaseConflictContext(
             branch_name="feature",
@@ -225,9 +229,9 @@ class TestRebaseConflictResolution:
         )
 
         with (
-            patch("stackman.conflict_resolver.rebase_in_progress", return_value=False),
-            patch("stackman.conflict_resolver.is_ancestor", return_value=True),
-            patch("stackman.conflict_resolver.worktree_dirty_preview", return_value=None),
+            patch("stackman.lib.conflict_resolver.rebase_in_progress", return_value=False),
+            patch("stackman.lib.conflict_resolver.is_ancestor", return_value=True),
+            patch("stackman.lib.conflict_resolver.worktree_dirty_preview", return_value=None),
         ):
             resolution = RebaseConflictResolution(ctx, conflict_ctx, resolver=None, no_wait=False)
             result = resolution._try_interactive()
@@ -240,7 +244,7 @@ class TestRebaseConflictResolution:
         ctx = self._make_context()
         ctx.stdin = io.StringIO("\n")  # User presses Enter
 
-        from stackman.conflict_resolver import RebaseConflictContext
+        from stackman.lib.conflict_resolver import RebaseConflictContext
 
         conflict_ctx = RebaseConflictContext(
             branch_name="feature",
@@ -251,8 +255,8 @@ class TestRebaseConflictResolution:
         )
 
         with (
-            patch("stackman.conflict_resolver.rebase_in_progress", return_value=False),
-            patch("stackman.conflict_resolver.is_ancestor", return_value=False),
+            patch("stackman.lib.conflict_resolver.rebase_in_progress", return_value=False),
+            patch("stackman.lib.conflict_resolver.is_ancestor", return_value=False),
         ):
             resolution = RebaseConflictResolution(ctx, conflict_ctx, resolver=None, no_wait=False)
             result = resolution._try_interactive()
@@ -265,7 +269,7 @@ class TestRebaseConflictResolution:
         ctx = self._make_context()
         ctx.stdin = io.StringIO("\n")  # stdin available (would enable interactive)
 
-        from stackman.conflict_resolver import RebaseConflictContext
+        from stackman.lib.conflict_resolver import RebaseConflictContext
 
         conflict_ctx = RebaseConflictContext(
             branch_name="feature",
@@ -277,10 +281,10 @@ class TestRebaseConflictResolution:
 
         # Mock the resolver to succeed
         with (
-            patch("stackman.conflict_resolver.rebase_in_progress", return_value=False),
-            patch("stackman.conflict_resolver.is_ancestor", return_value=True),
-            patch("stackman.conflict_resolver.worktree_dirty_preview", return_value=None),
-            patch("stackman.conflict_resolver._invoke_resolver") as mock_invoke,
+            patch("stackman.lib.conflict_resolver.rebase_in_progress", return_value=False),
+            patch("stackman.lib.conflict_resolver.is_ancestor", return_value=True),
+            patch("stackman.lib.conflict_resolver.worktree_dirty_preview", return_value=None),
+            patch("stackman.lib.conflict_resolver._invoke_resolver") as mock_invoke,
         ):
             mock_invoke.return_value = ConflictResolutionResult(
                 status="success",

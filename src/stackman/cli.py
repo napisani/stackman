@@ -8,7 +8,7 @@ from pathlib import Path
 import click
 
 from . import __version__
-from .app import StackmanApp
+from .commands.app import StackmanApp
 
 
 def _default_db_path() -> Path:
@@ -59,8 +59,8 @@ def _completion_paths(ctx: click.Context) -> tuple[Path, Path]:
 def _complete_tracked_branches(ctx: click.Context, param, incomplete: str) -> list[str]:
     """Complete from Stackman-tracked branch names. Must never raise (would break the shell)."""
     try:
-        from .git_ops import repo_db_key
-        from .store import list_branches
+        from .lib.git_ops import repo_db_key
+        from .lib.store import list_branches
 
         db_path, cwd = _completion_paths(ctx)
         if not db_path.exists():  # don't create the db as a completion side effect
@@ -74,7 +74,7 @@ def _complete_tracked_branches(ctx: click.Context, param, incomplete: str) -> li
 def _complete_local_branches(ctx: click.Context, param, incomplete: str) -> list[str]:
     """Complete from all local Git branches (for tracking new branches/parents)."""
     try:
-        from .git_ops import local_branches
+        from .lib.git_ops import local_branches
 
         _, cwd = _completion_paths(ctx)
         names = local_branches(cwd)
@@ -142,6 +142,7 @@ def cli(ctx: click.Context, db_path: Path, repo_path: Path | None) -> None:
       stackman chain main a b c             # record an existing linear stack
       stackman list                         # show the stack tree for this repo
       stackman conflicts                    # predict rebases that would conflict
+      stackman sync-conflicted               # sync every stack predicted to conflict
       stackman sync feature                 # rebase the whole stack containing 'feature'
       stackman done feature                 # feature landed; lift its children up
       stackman forget --all                 # drop all tracking for this repo
@@ -196,6 +197,74 @@ def conflicts_command(
     """Predict rebase conflicts across every tracked stack in this repository."""
     app = cfg.resolve(db_path, repo_path)
     raise SystemExit(app.conflicts(as_json=as_json, no_fetch_and_pull=no_fetch_and_pull))
+
+
+@cli.command("sync-conflicted")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Probe and show selected sync plans without modifying the repository.",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Print the exact git rebase command implied for each branch.",
+)
+@click.option(
+    "--squash",
+    is_flag=True,
+    help="Squash 2+ commits after the fork-point into one before rebasing each branch.",
+)
+@click.option(
+    "--allow-dirty",
+    is_flag=True,
+    help="Skip dirty-worktree preflight; Git may still abort checkout or rebase.",
+)
+@click.option(
+    "--no-fetch-and-pull",
+    is_flag=True,
+    help="Skip Stackman's best-effort origin fetch and fast-forward-only pull.",
+)
+@click.option(
+    "--resolver",
+    type=str,
+    default=None,
+    help="Command to invoke for non-interactive conflict resolution (overrides STACKMAN_RESOLVER).",
+)
+@click.option(
+    "--no-wait",
+    is_flag=True,
+    help="Force non-interactive mode; skip TTY check for conflict resolution.",
+)
+@repo_options
+@click.pass_obj
+def sync_conflicted_command(
+    cfg: CliConfig,
+    dry_run: bool,
+    verbose: bool,
+    squash: bool,
+    allow_dirty: bool,
+    no_fetch_and_pull: bool,
+    resolver: str | None,
+    no_wait: bool,
+    db_path,
+    repo_path,
+) -> None:
+    """Sync every tracked stack whose predictive rebase probe finds a conflict."""
+    app = cfg.resolve(db_path, repo_path)
+    resolver = resolver or os.environ.get("STACKMAN_RESOLVER")
+    raise SystemExit(
+        app.sync_conflicted(
+            dry_run=dry_run,
+            verbose=verbose,
+            squash=squash,
+            allow_dirty=allow_dirty,
+            no_fetch_and_pull=no_fetch_and_pull,
+            resolver=resolver,
+            no_wait=no_wait,
+        )
+    )
 
 
 @cli.command("sync")
@@ -433,7 +502,7 @@ def show_resolver_prompt(template: bool) -> None:
       PROMPT="$PROMPT\\n\\nAdditional context: ..."
       stackman sync --resolver "claude -p \\"$PROMPT\\""
     """
-    from .resolver_prompt import get_default_prompt, get_template
+    from .lib.resolver_prompt import get_default_prompt, get_template
 
     if template:
         click.echo(get_template())

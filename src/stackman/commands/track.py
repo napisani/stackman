@@ -4,10 +4,11 @@ from collections import defaultdict, deque
 from collections.abc import Sequence
 from pathlib import Path
 
-from ..context import AppContext
-from ..git_ops import branch_exists, merge_base
-from ..stack_ids import new_auto_stack_id
-from ..store import (
+from ..lib.command_support import resolve_repo
+from ..lib.context import AppContext
+from ..lib.git_ops import branch_exists, merge_base
+from ..lib.stack_ids import new_auto_stack_id
+from ..lib.store import (
     clear_branch_labels,
     get_branch,
     label_branch,
@@ -15,7 +16,6 @@ from ..store import (
     list_branches,
     upsert_branch,
 )
-from .shared import resolve_repo
 
 
 def run_track(ctx: AppContext, *, branch: str | None, parent: str) -> int:

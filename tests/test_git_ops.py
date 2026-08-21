@@ -11,7 +11,7 @@ for path in (SRC_DIR, TEST_DIR):
 
 from git_repo_fixture import GitRepoFixture
 
-from stackman.git_ops import (
+from stackman.lib.git_ops import (
     branch_exists,
     current_branch,
     get_git_config,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from stackman.models import BranchRecord
-from stackman.sync_plan import build_sync_plan
+from stackman.lib.models import BranchRecord
+from stackman.lib.sync_plan import build_sync_plan
 
 
 def _branch(

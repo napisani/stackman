@@ -3,9 +3,9 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from stackman.app import StackmanApp
-from stackman.git_ops import repo_db_key
-from stackman.store import initialize, list_branch_labels
+from stackman.commands.app import StackmanApp
+from stackman.lib.git_ops import repo_db_key
+from stackman.lib.store import initialize, list_branch_labels
 
 
 def test_init_from_linked_worktree_inherits_parent_labels(

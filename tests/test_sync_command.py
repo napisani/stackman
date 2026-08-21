@@ -4,9 +4,9 @@ import io
 import subprocess
 from pathlib import Path
 
-from stackman.app import StackmanApp
-from stackman.git_ops import is_ancestor
-from stackman.store import get_branch, initialize, label_branch, upsert_branch
+from stackman.commands.app import StackmanApp
+from stackman.lib.git_ops import is_ancestor
+from stackman.lib.store import get_branch, initialize, label_branch, upsert_branch
 
 
 class _ConflictResolverInput:

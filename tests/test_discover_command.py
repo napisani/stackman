@@ -7,9 +7,9 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from stackman.app import StackmanApp
 from stackman.cli import cli
-from stackman.store import get_branch
+from stackman.commands.app import StackmanApp
+from stackman.lib.store import get_branch
 
 
 def _write_fake_gh(tmp_path: Path, monkeypatch, prs: list[dict]) -> None:
