@@ -45,6 +45,7 @@ def test_sync_command_help() -> None:
     assert "--dry-run" in result.output
     assert "--squash" in result.output
     assert "--allow-dirty" in result.output
+    assert "--no-fetch-and-pull" in result.output
     assert "STACK_ID" not in result.output
     assert "--stack" not in result.output
 

@@ -82,6 +82,72 @@ def test_sync_rebases_linear_stack_when_trunk_moves(
     assert git_repo.is_ancestor(git_repo.rev_parse("main"), "HEAD")
 
 
+def test_sync_fetches_origin_before_rebasing_a_stale_main(
+    git_repo,
+    stackman_db_path,
+    tmp_path,
+) -> None:
+    remote = tmp_path / "origin.git"
+    subprocess.run(
+        ["git", "init", "--bare", str(remote)], check=True, capture_output=True, text=True
+    )
+    git_repo.git("remote", "add", "origin", str(remote))
+    git_repo.git("push", "-u", "origin", "main")
+
+    git_repo.checkout_new("feature", from_ref="main")
+    git_repo.commit("feature work", filename="feature.txt", content="feature\n")
+    fork = git_repo.merge_base("feature", "main")
+
+    initialize(stackman_db_path)
+    repo_key = git_repo.canonical_repo_key()
+    upsert_branch(
+        stackman_db_path,
+        repo_root=repo_key,
+        branch_name="feature",
+        parent_branch_name="main",
+        fork_point_sha=fork,
+    )
+    label_branch(stackman_db_path, repo_key, "feature", "stack-origin", anchor_branch_name="main")
+
+    updater = tmp_path / "updater"
+    subprocess.run(
+        ["git", "clone", str(remote), str(updater)], check=True, capture_output=True, text=True
+    )
+    subprocess.run(["git", "-C", str(updater), "checkout", "main"], check=True)
+    subprocess.run(["git", "-C", str(updater), "config", "user.name", "Stackman Test"], check=True)
+    subprocess.run(
+        ["git", "-C", str(updater), "config", "user.email", "stackman@example.com"], check=True
+    )
+    (updater / "remote-main.txt").write_text("remote main\n")
+    subprocess.run(["git", "-C", str(updater), "add", "remote-main.txt"], check=True)
+    subprocess.run(["git", "-C", str(updater), "commit", "-m", "remote main moves"], check=True)
+    subprocess.run(["git", "-C", str(updater), "push", "origin", "main"], check=True)
+    remote_main_tip = subprocess.run(
+        ["git", "-C", str(updater), "rev-parse", "main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    git_repo.checkout("feature")
+    assert git_repo.rev_parse("main") != remote_main_tip
+
+    stdout = io.StringIO()
+    app = StackmanApp(
+        db_path=stackman_db_path,
+        cwd=git_repo.root,
+        stdin=io.StringIO(""),
+        stdout=stdout,
+        stderr=io.StringIO(),
+    )
+    assert app.sync(branch="feature") == 0
+
+    assert git_repo.rev_parse("main") != remote_main_tip
+    assert git_repo.merge_base("feature", "origin/main") == remote_main_tip
+    assert "Pulling the current branch from its upstream (--ff-only)." in stdout.getvalue()
+    assert "Warning: git pull --ff-only failed" in stdout.getvalue()
+
+
 def test_sync_dry_run_reports_anchor_and_uses_it_for_root_rebase(
     git_repo,
     stackman_db_path,

@@ -204,6 +204,11 @@ def chain(cfg: CliConfig, anchor: str, branches: tuple[str, ...], db_path, repo_
     help="Skip dirty-worktree preflight; Git may still abort checkout or rebase.",
 )
 @click.option(
+    "--no-fetch-and-pull",
+    is_flag=True,
+    help="Skip Stackman's best-effort origin fetch and fast-forward-only pull.",
+)
+@click.option(
     "--resolver",
     type=str,
     default=None,
@@ -223,6 +228,7 @@ def sync_command(
     verbose: bool,
     squash: bool,
     allow_dirty: bool,
+    no_fetch_and_pull: bool,
     resolver: str | None,
     no_wait: bool,
     db_path,
@@ -251,6 +257,7 @@ def sync_command(
             verbose=verbose,
             squash=squash,
             allow_dirty=allow_dirty,
+            no_fetch_and_pull=no_fetch_and_pull,
             resolver=resolver,
             no_wait=no_wait,
         )

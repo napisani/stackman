@@ -198,6 +198,27 @@ def upstream_branch(cwd: Path, branch: str) -> str | None:
     return ref or None
 
 
+def has_remote(cwd: Path, remote: str) -> bool:
+    """Whether a named Git remote is configured in this repository."""
+    return _run_git(cwd, "remote", "get-url", remote, check=False).returncode == 0
+
+
+def fetch_remote(cwd: Path, remote: str) -> subprocess.CompletedProcess[str]:
+    """Fetch the latest remote-tracking refs without touching the worktree."""
+    return _run_git(cwd, "fetch", remote, check=False)
+
+
+def pull_ff_only(cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Fast-forward the current branch from its upstream without creating a merge commit."""
+    return _run_git(cwd, "pull", "--ff-only", check=False)
+
+
+def remote_tracking_branch(cwd: Path, remote: str, branch: str) -> str | None:
+    """Return the remote-tracking ref for a branch, if it exists locally."""
+    ref = f"{remote}/{branch}"
+    return ref if rev_parse_or_none(cwd, ref) is not None else None
+
+
 def push_force_with_lease_current_branch(cwd: Path) -> subprocess.CompletedProcess[str]:
     """Push current HEAD using its configured @{upstream} (if any)."""
     return _run_git(cwd, "push", "--force-with-lease", check=False)

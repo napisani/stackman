@@ -88,7 +88,7 @@ stackman chain main a b c
 
 ### `stackman sync [BRANCH]`
 
-Rebase the whole stack containing `BRANCH` (default: current). Runs the stack in order from the root, so each branch rebases onto the freshly-updated parent.
+Rebase the whole stack containing `BRANCH` (default: current). Runs the stack in order from the root, so each branch rebases onto the freshly-updated parent. When `origin` is configured, sync first fetches it and fast-forwards the invoking branch with `git pull --ff-only`; a successful fetch makes `origin/<anchor>` the root rebase target. Fetch/pull failures warn and fall back to local refs.
 
 ```bash
 stackman sync feature
@@ -102,6 +102,7 @@ Options:
 | `-v, --verbose` | Print the exact git rebase command for each branch. |
 | `--squash` | Squash 2+ commits after the fork-point into one before rebasing each branch. |
 | `--allow-dirty` | Skip the dirty-worktree preflight. Git may still abort checkout or rebase. |
+| `--no-fetch-and-pull` | Skip the best-effort `origin` fetch and fast-forward-only pull. |
 | `--resolver CMD` | Resolve conflicts non-interactively with `CMD` (overrides `STACKMAN_RESOLVER`). |
 | `--no-wait` | Force non-interactive mode; don't wait for TTY input on conflict. |
 

@@ -10,11 +10,15 @@ from ..git_ops import (
     commits_since,
     create_branch_worktree,
     current_branch,
+    fetch_remote,
+    has_remote,
     is_ancestor,
     merge_base,
+    pull_ff_only,
     push_force_with_lease_current_branch,
     rebase_in_progress_any_linked,
     rebase_onto,
+    remote_tracking_branch,
     remove_worktree,
     repo_db_key,
     repo_root,
@@ -51,6 +55,7 @@ def run(
     allow_dirty: bool,
     resolver: str | None = None,
     no_wait: bool = False,
+    no_fetch_and_pull: bool = False,
 ) -> int:
     initialize(ctx.db_path)
 
@@ -114,11 +119,12 @@ def run(
                     + "\n(Other linked worktrees do not need to be clean.)"
                 )
 
-    _print_plan(ctx, plan, worktree, dry_run=dry_run)
-
     if dry_run:
+        _print_plan(ctx, plan, worktree, dry_run=True)
         return _run_dry_run(ctx, plan, all_branches, worktree, squash=squash)
 
+    use_origin_anchor = _fetch_and_pull(ctx, worktree, skip=no_fetch_and_pull)
+    _print_plan(ctx, plan, worktree, dry_run=False)
     return _apply_sync(
         ctx,
         plan,
@@ -130,7 +136,37 @@ def run(
         verbose=verbose,
         resolver=resolver,
         no_wait=no_wait,
+        use_origin_anchor=use_origin_anchor,
     )
+
+
+def _fetch_and_pull(ctx: AppContext, worktree: Path, *, skip: bool) -> bool:
+    """Best-effort origin refresh; fresh origin refs become root rebase anchors."""
+    if skip:
+        _emit(ctx, "[stackman] Skipping origin fetch and pull (--no-fetch-and-pull).")
+        return False
+    if not has_remote(worktree, "origin"):
+        return False
+
+    _emit(ctx, "[stackman] Fetching origin.")
+    fetch_result = fetch_remote(worktree, "origin")
+    fetched = fetch_result.returncode == 0
+    if not fetched:
+        _warn_git_failure(ctx, "fetch origin", fetch_result.stdout, fetch_result.stderr)
+
+    _emit(ctx, "[stackman] Pulling the current branch from its upstream (--ff-only).")
+    pull_result = pull_ff_only(worktree)
+    if pull_result.returncode != 0:
+        _warn_git_failure(ctx, "pull --ff-only", pull_result.stdout, pull_result.stderr)
+
+    return fetched
+
+
+def _warn_git_failure(ctx: AppContext, command: str, stdout: str, stderr: str) -> None:
+    _emit(ctx, f"[stackman] Warning: git {command} failed; continuing with local refs.")
+    detail = (stderr or stdout).strip()
+    if detail:
+        _emit(ctx, f"[stackman]   {detail}")
 
 
 def _run_dry_run(
@@ -188,6 +224,7 @@ def _apply_sync(
     verbose: bool,
     resolver: str | None = None,
     no_wait: bool = False,
+    use_origin_anchor: bool,
 ) -> int:
     by_name: dict[str, BranchRecord] = {str(b.branch_name): b for b in all_branches}
     try:
@@ -203,6 +240,7 @@ def _apply_sync(
                 verbose=verbose,
                 resolver=resolver,
                 no_wait=no_wait,
+                use_origin_anchor=use_origin_anchor,
             ):
                 return 1
     finally:
@@ -228,6 +266,7 @@ def _sync_one_branch(
     verbose: bool,
     resolver: str | None = None,
     no_wait: bool = False,
+    use_origin_anchor: bool,
 ) -> bool:
     """Rebase + push one branch. Returns True to continue, False to abort the sync."""
     branch_name = record.branch_name
@@ -267,7 +306,10 @@ def _sync_one_branch(
             return False
 
     try:
-        parent_tip = rev_parse(branch_wt, parent_name)
+        parent_ref = _rebase_parent_ref(
+            branch_wt, plan, record, parent_name, use_origin_anchor=use_origin_anchor
+        )
+        parent_tip = rev_parse(branch_wt, parent_ref)
         upstream = record.fork_point_sha
 
         # A parent rebased earlier in this sync no longer contains the stored
@@ -280,7 +322,7 @@ def _sync_one_branch(
                 f"[stackman] ⚠️  Fork-point {upstream[:7]} is no longer an ancestor of {branch_name!r}. "
                 "Recalculating (the branch may have been rewritten).",
             )
-            upstream = merge_base(branch_wt, branch_name, parent_name)
+            upstream = merge_base(branch_wt, branch_name, parent_ref)
             _emit(
                 ctx,
                 f"[stackman]    Recalculated fork-point: {upstream[:7]}",
@@ -408,6 +450,20 @@ def _push_if_needed(ctx: AppContext, branch_wt: Path, branch_name: str) -> bool:
             ctx.stderr.write(f"{msg}\n")
         return False
     return True
+
+
+def _rebase_parent_ref(
+    worktree: Path,
+    plan: SyncPlan,
+    record: BranchRecord,
+    parent_name: str,
+    *,
+    use_origin_anchor: bool,
+) -> str:
+    """Root branches use fetched origin; descendants use the parent just synced locally."""
+    if use_origin_anchor and record.branch_name in plan.roots:
+        return remote_tracking_branch(worktree, "origin", parent_name) or parent_name
+    return parent_name
 
 
 def _sync_parent_name(plan: SyncPlan, record: BranchRecord) -> str | None:

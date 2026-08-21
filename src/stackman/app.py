@@ -55,6 +55,7 @@ class StackmanApp:
         allow_dirty: bool = False,
         resolver: str | None = None,
         no_wait: bool = False,
+        no_fetch_and_pull: bool = False,
     ) -> int:
         return self._run(
             lambda c: sync.run(
@@ -66,6 +67,7 @@ class StackmanApp:
                 allow_dirty=allow_dirty,
                 resolver=resolver,
                 no_wait=no_wait,
+                no_fetch_and_pull=no_fetch_and_pull,
             )
         )
 
