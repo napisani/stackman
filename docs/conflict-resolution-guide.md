@@ -246,7 +246,9 @@ stackman sync feature  # retry
 
 ### Resolver Never Completes
 
-If the resolver hangs, stackman times out after **600 seconds**. Check that your resolver:
+Stackman does not impose a timeout on the resolver — it waits until the
+resolver exits, so a hung resolver will block the sync indefinitely (interrupt
+it with Ctrl-C). Check that your resolver:
 
 1. Actually completes the rebase (`git rebase --continue`)
 2. Doesn't wait for interactive input after completing

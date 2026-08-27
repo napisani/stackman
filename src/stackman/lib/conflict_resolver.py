@@ -281,7 +281,7 @@ def _invoke_resolver(
     resolver_env.update(env_vars)
 
     try:
-        # Run resolver with stdin=/dev/null, timeout 600s
+        # Run resolver with stdin=/dev/null (no timeout)
         try:
             resolver_result = subprocess.run(
                 resolver_argv,
@@ -289,15 +289,7 @@ def _invoke_resolver(
                 stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
-                timeout=600,
                 env=resolver_env,
-            )
-        except subprocess.TimeoutExpired:
-            ctx.stderr.write("[stackman] Resolver timed out after 600 seconds.\n")
-            _abort_rebase(conflict_ctx.branch_wt)
-            return ConflictResolutionResult(
-                status="failure",
-                message="Resolver timed out after 600 seconds",
             )
         except Exception as e:
             ctx.stderr.write(f"[stackman] Resolver invocation failed: {e}\n")

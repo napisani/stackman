@@ -416,14 +416,18 @@ curl https://api.anthropic.com/v1/messages \
   -d "{\"model\": \"claude-opus-4-1\", \"max_tokens\": 100, \"messages\": [{\"role\": \"user\", \"content\": \"hi\"}]}"
 ```
 
-### Resolver Timeout (600s)
+### Resolver Runs Forever
 
-If your resolver takes longer than 10 minutes, it will be killed. Options:
+Stackman waits for the resolver indefinitely — there is no timeout, so a hung
+resolver blocks the sync until you interrupt it (Ctrl-C). If yours is slow or
+hanging:
 
-1. **Optimize the resolver** — Reduce token count, simplify prompt
-2. **Increase model performance** — Use a faster model for initial tests
-3. **Use caching** — Cache resolved patterns from previous conflicts
-4. **Check for hangs** — Ensure resolver doesn't wait for interactive input
+1. **Check for hangs** — Ensure resolver doesn't wait for interactive input
+2. **Optimize the resolver** — Reduce token count, simplify prompt
+3. **Increase model performance** — Use a faster model for initial tests
+4. **Use caching** — Cache resolved patterns from previous conflicts
+5. **Enforce your own limit** — Wrap the resolver in `timeout 600 <cmd>` if you
+   want one
 
 ## Performance Tips
 
