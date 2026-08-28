@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import sys
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -19,7 +20,7 @@ def _write_fake_gh(tmp_path: Path, monkeypatch, prs: list[dict]) -> None:
     prs_path.write_text(json.dumps(prs))
     gh = bin_dir / "gh"
     gh.write_text(
-        "#!/usr/bin/env python3\n"
+        f"#!{sys.executable}\n"
         "import json, os, sys\n"
         "prs = json.load(open(os.environ['FAKE_GH_PRS']))\n"
         "args = sys.argv[1:]\n"
