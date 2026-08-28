@@ -1445,7 +1445,7 @@ def test_sync_with_resolver_resolves_conflict(
     # Create a resolver script that resolves the conflict
     resolver_script = tmp_path / "resolver.sh"
     resolver_script.write_text(
-        "#!/bin/bash\n"
+        "#!/bin/sh\n"
         "# Simple resolver: take both sides\n"
         "git status --porcelain | grep -E '^UU|^AA|^DD' | awk '{print $2}' | while read file; do\n"
         "  echo 'main' > \"$file\"\n"
@@ -1507,7 +1507,7 @@ def test_sync_with_failing_resolver_aborts_sync(
 
     # Create a resolver script that fails
     resolver_script = tmp_path / "failing_resolver.sh"
-    resolver_script.write_text("#!/bin/bash\n# Resolver that immediately fails\nexit 1\n")
+    resolver_script.write_text("#!/bin/sh\n# Resolver that immediately fails\nexit 1\n")
     resolver_script.chmod(0o755)
 
     stdout = io.StringIO()
@@ -1577,7 +1577,7 @@ def test_sync_multi_branch_stack_with_mid_stack_conflict_and_resolver(
     # Create resolver that handles the conflict
     resolver_script = tmp_path / "resolver.sh"
     resolver_script.write_text(
-        "#!/bin/bash\n"
+        "#!/bin/sh\n"
         "# Resolver for multi-branch test\n"
         "for file in $(git status --porcelain | grep -E '^UU|^AA|^DD' | awk '{print $2}'); do\n"
         "  echo 'main' > \"$file\"\n"
