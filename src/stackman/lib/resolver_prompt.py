@@ -7,6 +7,7 @@ methodology with clear safety guardrails and exit instructions.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 
 # The default conflict resolution prompt template.
 # All environment variables are templated as {VAR_NAME} for easy substitution.
@@ -121,31 +122,37 @@ Remember: Intent matters. You're merging two branches' work, not just text.
 """
 
 
-def get_default_prompt() -> str:
-    """Get the default conflict resolution prompt with environment variables substituted.
+def get_default_prompt(env: Mapping[str, str] | None = None) -> str:
+    """Get the default conflict resolution prompt with context variables substituted.
 
-    Returns the prompt with all STACKMAN_* environment variables replaced
-    with their values, or the variable name in {braces} if not set.
+    `env` is the mapping of STACKMAN_* values to substitute; it defaults to the
+    process environment. Callers that build the resolver environment themselves
+    (see `conflict_resolver._populate_resolver_env_vars`) must pass it, since
+    those values are never written into `os.environ`.
+
+    Required variables that are missing are left as `{VAR_NAME}`; optional ones
+    render as "not provided".
     """
     prompt = DEFAULT_CONFLICT_RESOLUTION_PROMPT
+    source = os.environ if env is None else env
 
-    # Template all STACKMAN_* environment variables
-    env_vars = {
-        "STACKMAN_BRANCH": os.environ.get("STACKMAN_BRANCH", "{STACKMAN_BRANCH}"),
-        "STACKMAN_PARENT": os.environ.get("STACKMAN_PARENT", "{STACKMAN_PARENT}"),
-        "STACKMAN_PARENT_TIP": os.environ.get("STACKMAN_PARENT_TIP", "{STACKMAN_PARENT_TIP}"),
-        "STACKMAN_FORK_POINT": os.environ.get("STACKMAN_FORK_POINT", "{STACKMAN_FORK_POINT}"),
-        "STACKMAN_CONFLICTED_FILES": os.environ.get(
+    # Template all STACKMAN_* variables
+    template_vars = {
+        "STACKMAN_BRANCH": source.get("STACKMAN_BRANCH", "{STACKMAN_BRANCH}"),
+        "STACKMAN_PARENT": source.get("STACKMAN_PARENT", "{STACKMAN_PARENT}"),
+        "STACKMAN_PARENT_TIP": source.get("STACKMAN_PARENT_TIP", "{STACKMAN_PARENT_TIP}"),
+        "STACKMAN_FORK_POINT": source.get("STACKMAN_FORK_POINT", "{STACKMAN_FORK_POINT}"),
+        "STACKMAN_CONFLICTED_FILES": source.get(
             "STACKMAN_CONFLICTED_FILES", "{STACKMAN_CONFLICTED_FILES}"
         ),
-        "STACKMAN_OPERATION": os.environ.get("STACKMAN_OPERATION", "{STACKMAN_OPERATION}"),
-        "STACKMAN_REPO_URL": os.environ.get("STACKMAN_REPO_URL", "not provided"),
-        "STACKMAN_PARENT_PR_NUMBER": os.environ.get("STACKMAN_PARENT_PR_NUMBER", "not provided"),
-        "STACKMAN_PR_NUMBER": os.environ.get("STACKMAN_PR_NUMBER", "not provided"),
+        "STACKMAN_OPERATION": source.get("STACKMAN_OPERATION", "{STACKMAN_OPERATION}"),
+        "STACKMAN_REPO_URL": source.get("STACKMAN_REPO_URL", "not provided"),
+        "STACKMAN_PARENT_PR_NUMBER": source.get("STACKMAN_PARENT_PR_NUMBER", "not provided"),
+        "STACKMAN_PR_NUMBER": source.get("STACKMAN_PR_NUMBER", "not provided"),
     }
 
     # Replace all template variables
-    for key, value in env_vars.items():
+    for key, value in template_vars.items():
         prompt = prompt.replace(f"{{{key}}}", value)
 
     return prompt

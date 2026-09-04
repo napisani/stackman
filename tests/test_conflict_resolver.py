@@ -305,3 +305,67 @@ class TestRebaseConflictResolution:
             assert result.status == "success"
             # Verify stdin was not read (would indicate interactive was used)
             assert ctx.stdin.getvalue() == "\n"  # stdin unchanged
+
+
+class TestPromptExpansion:
+    """Test that @prompt expands to the substituted prompt text as one argv entry."""
+
+    def _run_resolver(self, resolver: str) -> list[str]:
+        """Invoke _invoke_resolver with everything stubbed; return the argv it built."""
+        from subprocess import CompletedProcess
+
+        from stackman.lib.conflict_resolver import RebaseConflictContext, _invoke_resolver
+
+        ctx = AppContext(
+            db_path=Path("/tmp/test.db"),
+            cwd=Path("/tmp/repo"),
+            stdin=io.StringIO(""),
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+        )
+        conflict_ctx = RebaseConflictContext(
+            branch_name="feature",
+            branch_wt=Path("/tmp/repo"),
+            parent_name="main",
+            parent_tip="abc123",
+            fork_point="def456",
+        )
+
+        captured: list[list[str]] = []
+
+        def fake_run(argv, **kwargs):  # noqa: ANN001, ANN003
+            captured.append(argv)
+            return CompletedProcess(argv, 0, "", "")
+
+        with (
+            patch("stackman.lib.conflict_resolver._get_conflicted_files", return_value=["a.ts"]),
+            patch("stackman.lib.conflict_resolver.get_git_config", return_value=None),
+            patch("stackman.lib.conflict_resolver.get_pr_number", return_value=None),
+            patch("stackman.lib.conflict_resolver.subprocess.run", side_effect=fake_run),
+            patch("stackman.lib.conflict_resolver.rebase_in_progress", return_value=False),
+            patch("stackman.lib.conflict_resolver.is_ancestor", return_value=True),
+            patch("stackman.lib.conflict_resolver.worktree_dirty_preview", return_value=None),
+        ):
+            result = _invoke_resolver(ctx, conflict_ctx, resolver)
+
+        assert result.status == "success"
+        assert len(captured) == 1
+        return captured[0]
+
+    def test_prompt_token_becomes_single_argv_entry(self) -> None:
+        argv = self._run_resolver("claude -p @prompt")
+        assert argv[:2] == ["claude", "-p"]
+        assert len(argv) == 3
+
+    def test_prompt_text_has_context_substituted(self) -> None:
+        prompt = self._run_resolver("claude -p @prompt")[2]
+        assert "Branch being rebased: feature" in prompt
+        assert "Parent branch: main" in prompt
+        assert "Parent branch tip: abc123" in prompt
+        assert "Fork point (rebase upstream): def456" in prompt
+        assert "a.ts" in prompt
+        assert "Operation: rebase" in prompt
+
+    def test_no_placeholders_survive_expansion(self) -> None:
+        prompt = self._run_resolver("claude -p @prompt")[2]
+        assert "{STACKMAN_" not in prompt
