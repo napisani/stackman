@@ -359,10 +359,10 @@ class TestPromptExpansion:
 
     def test_prompt_text_has_context_substituted(self) -> None:
         prompt = self._run_resolver("claude -p @prompt")[2]
-        assert "Branch being rebased: feature" in prompt
+        assert "Branch being updated: feature" in prompt
         assert "Parent branch: main" in prompt
         assert "Parent branch tip: abc123" in prompt
-        assert "Fork point (rebase upstream): def456" in prompt
+        assert "Fork point: def456" in prompt
         assert "a.ts" in prompt
         assert "Operation: rebase" in prompt
 

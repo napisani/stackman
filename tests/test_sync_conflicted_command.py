@@ -38,6 +38,19 @@ def test_sync_conflicted_syncs_every_predicted_stack(git_repo, stackman_db_path,
     assert git_repo.is_ancestor(git_repo.rev_parse("main"), "two")
 
 
+def test_sync_conflicted_supports_merge_strategy(git_repo, stackman_db_path, tmp_path) -> None:
+    _create_two_conflicted_stacks(git_repo, stackman_db_path)
+    resolver = _resolver(tmp_path, operation="merge")
+
+    app, stdout, _ = _app(git_repo, stackman_db_path)
+
+    assert app.sync_conflicted(strategy="merge", resolver=str(resolver), no_wait=True) == 0
+    assert "stack-one" in stdout.getvalue()
+    assert "stack-two" in stdout.getvalue()
+    git_repo.checkout("one")
+    assert git_repo.is_ancestor(git_repo.rev_parse("main"), "HEAD")
+
+
 def test_sync_conflicted_stops_before_syncing_when_a_probe_errors(
     git_repo, stackman_db_path, monkeypatch
 ) -> None:
@@ -184,7 +197,7 @@ def _app(git_repo, stackman_db_path):
     )
 
 
-def _resolver(tmp_path):
+def _resolver(tmp_path, *, operation="rebase"):
     resolver = tmp_path / "resolve.sh"
     resolver.write_text(
         "#!/bin/sh\n"
@@ -192,7 +205,7 @@ def _resolver(tmp_path):
         "  printf 'resolved\\n' > \"$file\"\n"
         '  git add "$file"\n'
         "done\n"
-        "GIT_EDITOR=true git rebase --continue\n"
+        f"GIT_EDITOR=true git {operation} --continue\n"
     )
     resolver.chmod(0o755)
     return resolver

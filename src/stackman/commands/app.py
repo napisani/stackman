@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import Literal, TextIO
 
 from ..lib.context import AppContext
 from ..lib.runner import run_safely
@@ -56,14 +56,26 @@ class StackmanApp:
     def chain(self, *, anchor: str, branches: Sequence[str]) -> int:
         return self._run(lambda c: track.run_chain(c, anchor=anchor, branches=branches))
 
-    def conflicts(self, *, as_json: bool = False, no_fetch_and_pull: bool = False) -> int:
+    def conflicts(
+        self,
+        *,
+        strategy: Literal["rebase", "merge"] = "rebase",
+        as_json: bool = False,
+        no_fetch_and_pull: bool = False,
+    ) -> int:
         return self._run(
-            lambda c: conflicts.run(c, as_json=as_json, no_fetch_and_pull=no_fetch_and_pull)
+            lambda c: conflicts.run(
+                c,
+                strategy=strategy,
+                as_json=as_json,
+                no_fetch_and_pull=no_fetch_and_pull,
+            )
         )
 
     def sync_conflicted(
         self,
         *,
+        strategy: Literal["rebase", "merge"] = "rebase",
         dry_run: bool = False,
         verbose: bool = False,
         squash: bool = False,
@@ -75,6 +87,7 @@ class StackmanApp:
         return self._run(
             lambda c: sync_conflicted.run(
                 c,
+                strategy=strategy,
                 dry_run=dry_run,
                 verbose=verbose,
                 squash=squash,
@@ -89,6 +102,7 @@ class StackmanApp:
         self,
         *,
         branch: str | None = None,
+        strategy: Literal["rebase", "merge"] = "rebase",
         dry_run: bool = False,
         verbose: bool = False,
         squash: bool = False,
@@ -101,6 +115,7 @@ class StackmanApp:
             lambda c: sync.run(
                 c,
                 branch=branch,
+                strategy=strategy,
                 dry_run=dry_run,
                 verbose=verbose,
                 squash=squash,

@@ -5,14 +5,18 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from .git_ops import (
+    abort_merge,
     abort_rebase,
     checkout_detached,
     conflicted_files,
     create_detached_worktree,
     is_ancestor,
     merge_base,
+    merge_in_progress,
+    merge_parent,
     rebase_in_progress,
     rebase_onto,
     remote_tracking_branch,
@@ -41,11 +45,13 @@ def probe_all(
     branches: list[BranchRecord],
     *,
     fresh_origin: bool,
+    strategy: Literal["rebase", "merge"] = "rebase",
 ) -> list[ConflictReport]:
     """Predict every tracked stack without rendering or mutating named branch refs."""
     stack_ids = sorted({str(branch.stack_id) for branch in branches if branch.stack_id is not None})
     return [
-        _probe_stack(db_path, worktree, branches, stack_id, fresh_origin) for stack_id in stack_ids
+        _probe_stack(db_path, worktree, branches, stack_id, fresh_origin, strategy)
+        for stack_id in stack_ids
     ]
 
 
@@ -55,6 +61,7 @@ def _probe_stack(
     branches: list[BranchRecord],
     stack_id: str,
     fresh_origin: bool,
+    strategy: Literal["rebase", "merge"],
 ) -> ConflictReport:
     stack = get_stack(db_path, stack_id)
     plan = build_sync_plan(
@@ -82,7 +89,15 @@ def _probe_stack(
     cleanup_error: str | None = None
     try:
         try:
-            report = _run_probe_rebase(worktree, probe_dir, branches, stack_id, plan, fresh_origin)
+            report = _run_probe(
+                worktree,
+                probe_dir,
+                branches,
+                stack_id,
+                plan,
+                fresh_origin,
+                strategy,
+            )
         except (OSError, subprocess.CalledProcessError) as exc:
             report = ConflictReport(stack=stack_id, status="probe_error", detail=str(exc))
     finally:
@@ -99,13 +114,14 @@ def _probe_stack(
     return report
 
 
-def _run_probe_rebase(
+def _run_probe(
     worktree: Path,
     probe_dir: Path,
     branches: list[BranchRecord],
     stack_id: str,
     plan: SyncPlan,
     fresh_origin: bool,
+    strategy: Literal["rebase", "merge"],
 ) -> ConflictReport:
     by_name = {str(branch.branch_name): branch for branch in branches}
     simulated_tips: dict[str, str] = {}
@@ -117,11 +133,23 @@ def _run_probe_rebase(
                 stack=stack_id, status="probe_error", branch=branch_name, detail="no parent"
             )
         parent_ref = _parent_ref(probe_dir, plan, branch, parent_name, simulated_tips, fresh_origin)
-        upstream = branch.fork_point_sha
+        stored_fork_point = branch.fork_point_sha
+        upstream = stored_fork_point
         if not is_ancestor(probe_dir, upstream, branch_name):
             upstream = merge_base(probe_dir, branch_name, parent_ref)
         parent_tip = rev_parse(probe_dir, parent_ref)
-        if upstream == parent_tip:
+        if strategy == "merge" and not is_ancestor(probe_dir, stored_fork_point, parent_ref):
+            return ConflictReport(
+                stack=stack_id,
+                status="probe_error",
+                branch=branch_name,
+                parent=parent_name,
+                detail="stored fork-point is not in the parent history; parent may have been rewritten",
+            )
+        if strategy == "merge" and is_ancestor(probe_dir, parent_tip, branch_name):
+            simulated_tips[branch_name] = rev_parse(probe_dir, branch_name)
+            continue
+        if strategy == "rebase" and upstream == parent_tip:
             simulated_tips[branch_name] = rev_parse(probe_dir, branch_name)
             continue
 
@@ -131,11 +159,19 @@ def _run_probe_rebase(
             return ConflictReport(
                 stack=stack_id, status="probe_error", branch=branch_name, detail=detail
             )
-        result = rebase_onto(probe_dir, onto=parent_tip, upstream=upstream, update_refs=False)
+        if strategy == "merge":
+            result = merge_parent(probe_dir, parent_ref)
+            operation_in_progress = merge_in_progress(probe_dir)
+        else:
+            result = rebase_onto(probe_dir, onto=parent_tip, upstream=upstream, update_refs=False)
+            operation_in_progress = rebase_in_progress(probe_dir)
         if result.returncode != 0:
             files = tuple(conflicted_files(probe_dir))
-            if rebase_in_progress(probe_dir):
-                abort_rebase(probe_dir)
+            if operation_in_progress:
+                if strategy == "merge":
+                    abort_merge(probe_dir)
+                else:
+                    abort_rebase(probe_dir)
                 return ConflictReport(
                     stack=stack_id,
                     status="conflict",
@@ -143,7 +179,7 @@ def _run_probe_rebase(
                     parent=parent_name,
                     files=files,
                 )
-            detail = (result.stderr or result.stdout).strip() or "rebase probe failed"
+            detail = (result.stderr or result.stdout).strip() or f"{strategy} probe failed"
             return ConflictReport(
                 stack=stack_id, status="probe_error", branch=branch_name, detail=detail
             )
@@ -184,18 +220,23 @@ def _parent_ref(
     return parent_name
 
 
-def report_lines(reports: list[ConflictReport]) -> list[str]:
+def report_lines(
+    reports: list[ConflictReport],
+    *,
+    strategy: Literal["rebase", "merge"] = "rebase",
+) -> list[str]:
     """Render prediction reports without owning an output stream."""
     conflicts = [report for report in reports if report.status == "conflict"]
     errors = [report for report in reports if report.status == "probe_error"]
     if not conflicts and not errors:
-        return ["No predicted rebase conflicts."]
+        return [f"No predicted {strategy} conflicts."]
 
+    verb = "rebasing" if strategy == "rebase" else "merging"
     lines = []
     for report in conflicts:
         files = ", ".join(report.files) or "(Git reported no unmerged paths)"
         lines.append(
-            f"{report.stack}: {report.branch} conflicts rebasing onto {report.parent} ({files})"
+            f"{report.stack}: {report.branch} conflicts {verb} onto {report.parent} ({files})"
         )
     for report in errors:
         lines.append(

@@ -82,6 +82,143 @@ def test_sync_rebases_linear_stack_when_trunk_moves(
     assert git_repo.is_ancestor(git_repo.rev_parse("main"), "HEAD")
 
 
+def test_sync_merges_parent_into_branch_without_rewriting_branch_commits(
+    git_repo,
+    stackman_db_path,
+) -> None:
+    git_repo.checkout_new("feature", from_ref="main")
+    feature_commit = git_repo.commit("feature work", filename="feature.txt", content="feature\n")
+    fork = git_repo.merge_base("feature", "main")
+    initialize(stackman_db_path)
+    repo_key = git_repo.canonical_repo_key()
+    upsert_branch(
+        stackman_db_path,
+        repo_root=repo_key,
+        branch_name="feature",
+        parent_branch_name="main",
+        fork_point_sha=fork,
+    )
+    label_branch(stackman_db_path, repo_key, "feature", "stack-merge", anchor_branch_name="main")
+
+    git_repo.checkout("main")
+    main_tip = git_repo.commit("main moves", filename="main.txt", content="main\n")
+
+    stdout = io.StringIO()
+    app = StackmanApp(
+        db_path=stackman_db_path,
+        cwd=git_repo.root,
+        stdin=io.StringIO(""),
+        stdout=stdout,
+        stderr=io.StringIO(),
+    )
+    assert app.sync(branch="feature", strategy="merge") == 0
+
+    git_repo.checkout("feature")
+    assert git_repo.is_ancestor(feature_commit, "HEAD")
+    assert git_repo.is_ancestor(main_tip, "HEAD")
+    assert len(git_repo.git("rev-list", "--parents", "-n", "1", "HEAD").split()) == 3
+    assert "Merging 'main' into 'feature'" in stdout.getvalue()
+
+
+def test_sync_merge_rejects_rewritten_parent_history(
+    git_repo,
+    stackman_db_path,
+) -> None:
+    root_tip = git_repo.rev_parse("main")
+    git_repo.commit("old parent change", filename="parent.txt", content="old\n")
+    git_repo.checkout_new("feature", from_ref="main")
+    feature_tip = git_repo.commit("feature work", filename="feature.txt", content="feature\n")
+    fork = git_repo.merge_base("feature", "main")
+
+    initialize(stackman_db_path)
+    repo_key = git_repo.canonical_repo_key()
+    upsert_branch(
+        stackman_db_path,
+        repo_root=repo_key,
+        branch_name="feature",
+        parent_branch_name="main",
+        fork_point_sha=fork,
+    )
+    label_branch(
+        stackman_db_path, repo_key, "feature", "stack-rewritten", anchor_branch_name="main"
+    )
+
+    git_repo.checkout("main")
+    git_repo.git("reset", "--hard", root_tip)
+    git_repo.commit("new parent history", filename="parent.txt", content="new\n")
+
+    stderr = io.StringIO()
+    app = StackmanApp(
+        db_path=stackman_db_path,
+        cwd=git_repo.root,
+        stdin=io.StringIO(""),
+        stdout=io.StringIO(),
+        stderr=stderr,
+    )
+    assert app.sync(branch="feature", strategy="merge", no_fetch_and_pull=True) != 0
+    assert "Cannot merge rewritten parent" in stderr.getvalue()
+    assert git_repo.rev_parse("feature") == feature_tip
+
+
+def test_sync_merge_pushes_normally(
+    git_repo,
+    stackman_db_path,
+    tmp_path,
+) -> None:
+    remote = tmp_path / "origin.git"
+    subprocess.run(
+        ["git", "init", "--bare", str(remote)], check=True, capture_output=True, text=True
+    )
+    git_repo.git("remote", "add", "origin", str(remote))
+    git_repo.git("push", "-u", "origin", "main")
+
+    git_repo.checkout_new("feature", from_ref="main")
+    git_repo.commit("feature work", filename="feature.txt", content="feature\n")
+    fork = git_repo.merge_base("feature", "main")
+    git_repo.git("push", "-u", "origin", "feature")
+
+    initialize(stackman_db_path)
+    repo_key = git_repo.canonical_repo_key()
+    upsert_branch(
+        stackman_db_path,
+        repo_root=repo_key,
+        branch_name="feature",
+        parent_branch_name="main",
+        fork_point_sha=fork,
+    )
+    label_branch(
+        db_path=stackman_db_path,
+        repo_root=repo_key,
+        branch_name="feature",
+        stack_id="stack-push",
+        anchor_branch_name="main",
+    )
+
+    git_repo.checkout("main")
+    git_repo.commit("main moves", filename="main.txt", content="main\n")
+    git_repo.git("push", "origin", "main")
+    git_repo.checkout("feature")
+
+    stdout = io.StringIO()
+    app = StackmanApp(
+        db_path=stackman_db_path,
+        cwd=git_repo.root,
+        stdin=io.StringIO(""),
+        stdout=stdout,
+        stderr=io.StringIO(),
+    )
+    assert app.sync(branch="feature", strategy="merge") == 0
+
+    remote_feature_tip = subprocess.run(
+        ["git", "--git-dir", str(remote), "rev-parse", "refs/heads/feature"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert remote_feature_tip == git_repo.rev_parse("feature")
+    assert "Pushing 'feature' normally" in stdout.getvalue()
+
+
 def test_sync_fetches_origin_before_rebasing_a_stale_main(
     git_repo,
     stackman_db_path,
@@ -1133,6 +1270,24 @@ def test_sync_allow_dirty_skips_dirty_preflight(
     assert "--allow-dirty skips the dirty-worktree preflight" in stdout.getvalue()
 
 
+def test_sync_merge_cannot_combine_with_squash(
+    git_repo,
+    stackman_db_path,
+) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    app = StackmanApp(
+        db_path=stackman_db_path,
+        cwd=git_repo.root,
+        stdin=io.StringIO(""),
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert app.sync(strategy="merge", squash=True) != 0
+    assert "cannot be combined" in stderr.getvalue()
+
+
 def test_sync_allow_dirty_cannot_combine_with_squash(
     git_repo,
     stackman_db_path,
@@ -1477,6 +1632,68 @@ def test_sync_with_resolver_resolves_conflict(
     assert result == 0, f"Sync failed: {err}"
 
     assert "Invoking resolver" in out or "completed successfully" in out
+
+
+def test_sync_merge_resolves_conflict_with_merge_resolver(
+    git_repo,
+    stackman_db_path,
+    tmp_path,
+) -> None:
+    git_repo.commit("shared base", filename="shared.txt", content="base\n")
+    git_repo.checkout_new("feature", from_ref="main")
+    feature_tip = git_repo.commit(
+        "feature edits shared", filename="shared.txt", content="feature\n"
+    )
+    fork = git_repo.merge_base("feature", "main")
+
+    initialize(stackman_db_path)
+    repo_key = git_repo.canonical_repo_key()
+    upsert_branch(
+        stackman_db_path,
+        repo_root=repo_key,
+        branch_name="feature",
+        parent_branch_name="main",
+        fork_point_sha=fork,
+    )
+    label_branch(stackman_db_path, repo_key, "feature", "stack-merge-resolver")
+
+    git_repo.checkout("main")
+    main_tip = git_repo.commit("main edits shared", filename="shared.txt", content="main\n")
+    operation_file = tmp_path / "operation.txt"
+    resolver_script = tmp_path / "merge-resolver.sh"
+    resolver_script.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s' \"$STACKMAN_OPERATION\" > '{operation_file}'\n"
+        "git status --porcelain | grep -E '^UU|^AA|^DD' | awk '{print $2}' | while read file; do\n"
+        "  printf 'main and feature\\n' > \"$file\"\n"
+        '  git add "$file"\n'
+        "done\n"
+        "GIT_EDITOR=true git merge --continue\n"
+    )
+    resolver_script.chmod(0o755)
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    app = StackmanApp(
+        db_path=stackman_db_path,
+        cwd=git_repo.root,
+        stdin=io.StringIO(""),
+        stdout=stdout,
+        stderr=stderr,
+    )
+    result = app.sync(
+        branch="feature",
+        strategy="merge",
+        resolver=str(resolver_script),
+        no_wait=True,
+    )
+
+    assert result == 0, stderr.getvalue()
+    git_repo.checkout("feature")
+    assert git_repo.is_ancestor(feature_tip, "HEAD")
+    assert git_repo.is_ancestor(main_tip, "HEAD")
+    assert operation_file.read_text() == "merge"
+    assert "Merge conflict" in stdout.getvalue()
 
 
 def test_sync_with_failing_resolver_aborts_sync(

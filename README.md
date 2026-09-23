@@ -2,7 +2,7 @@
 
 ![stackman logo](./stackman.jpg)
 
-Stackman manages stacked Git branches. You record which branches sit on which parent; Stackman stores that in a small SQLite database, shows you the stack, and rebases the whole thing with one command.
+Stackman manages stacked Git branches. You record which branches sit on which parent; Stackman stores that in a small SQLite database, shows you the stack, and syncs the whole thing with one command.
 
 It is branch-first. Every command takes an optional `BRANCH`, works from any worktree of the repository, and defaults to the currently checked-out branch. Stackman only records parent/fork-point metadata in its own database. It never creates, deletes, or checks out Git branches.
 
@@ -41,7 +41,7 @@ stackman list
 # └── feature
 #     └── feature-2
 
-# Predict which tracked stacks would hit a rebase conflict
+# Predict which tracked stacks would hit a sync conflict
 stackman conflicts
 
 # Sync every tracked stack whose predictive probe finds a conflict
@@ -49,6 +49,9 @@ stackman sync-conflicted
 
 # Rebase every branch in the stack onto its parent's latest tip
 stackman sync
+
+# Preserve history by merging each parent into its child
+stackman sync --strategy merge
 
 # A branch landed: lift its children onto its parent
 stackman done feature
@@ -66,7 +69,11 @@ stackman track feature --parent main
 # fork-point = main's tip at that moment
 ```
 
-`stackman sync` rebases everything after the fork-point onto the parent's current tip, one branch at a time, and force-pushes with lease. The fork-point is stored, not guessed, so a manual push between syncs never confuses it.
+`stackman sync` defaults to rebasing everything after the fork-point onto the
+parent's current tip, one branch at a time, and force-pushing with lease. With
+`--strategy merge`, it merges each parent's current tip into the child, preserves
+existing commit IDs, and pushes normally. The fork-point is stored, not guessed,
+so a manual push between syncs never confuses it.
 
 The database lives at `~/.local/share/stackman/stackman.db` (or `$XDG_DATA_HOME/stackman/stackman.db` when set). All worktrees of a repo share it.
 
@@ -94,7 +101,7 @@ stackman chain main a b c
 
 ### `stackman conflicts`
 
-Predict rebase conflicts across every tracked stack without moving local branches. Stackman probes each stack in a disposable detached worktree and reports the first conflicting branch and files. By default it best-effort fetches `origin` to test against the latest remote anchor; use `--no-fetch-and-pull` to use existing local refs. Exit status is `0` when all stacks are clean, `1` when a conflict is predicted, and `2` when a probe cannot run. Pass `--json` to report every stack result for automation.
+Predict conflicts for the selected operation across every tracked stack without moving local branches. Stackman probes each stack in a disposable detached worktree and reports the first conflicting branch and files. By default it best-effort fetches `origin` to test against the latest remote anchor; use `--no-fetch-and-pull` to use existing local refs. Exit status is `0` when all stacks are clean, `1` when a conflict is predicted, and `2` when a probe cannot run. Pass `--json` to report every stack result for automation.
 
 ### `stackman sync-conflicted`
 
@@ -102,7 +109,13 @@ Probe every tracked stack, then sync each stack predicted to conflict. Probing f
 
 ### `stackman sync [BRANCH]`
 
-Rebase the whole stack containing `BRANCH` (default: current). Runs the stack in order from the root, so each branch rebases onto the freshly-updated parent. When `origin` is configured, sync first fetches it and fast-forwards the invoking branch with `git pull --ff-only`; a successful fetch makes `origin/<anchor>` the root rebase target. Fetch/pull failures warn and fall back to local refs.
+Sync the whole stack containing `BRANCH` (default: current). Runs the stack in
+order from the root, so each branch updates from the freshly-updated parent.
+The default strategy rebases; `--strategy merge` preserves history with normal
+merge commits and ordinary pushes. When `origin` is configured, sync first
+fetches it and fast-forwards the invoking branch with `git pull --ff-only`; a
+successful fetch makes `origin/<anchor>` the root target. Fetch/pull failures
+warn and fall back to local refs.
 
 ```bash
 stackman sync feature
@@ -112,10 +125,11 @@ Options:
 
 | Option | What it does |
 |--------|--------------|
+| `--strategy rebase|merge` | Choose history-rewriting rebase or history-preserving merge. Defaults to `rebase`. |
 | `--dry-run` | Show the resolved sync set and planned steps without touching the repo. |
-| `-v, --verbose` | Print the exact git rebase command for each branch. |
-| `--squash` | Squash 2+ commits after the fork-point into one before rebasing each branch. |
-| `--allow-dirty` | Skip the dirty-worktree preflight. Git may still abort checkout or rebase. |
+| `-v, --verbose` | Print the exact Git operation for each branch. |
+| `--squash` | Squash 2+ commits after the fork-point into one before rebasing each branch; incompatible with merge strategy. |
+| `--allow-dirty` | Skip the dirty-worktree preflight. Git may still abort checkout or the selected operation. |
 | `--no-fetch-and-pull` | Skip the best-effort `origin` fetch and fast-forward-only pull. |
 | `--resolver CMD` | Resolve conflicts non-interactively with `CMD` (overrides `STACKMAN_RESOLVER`). |
 | `--no-wait` | Force non-interactive mode; don't wait for TTY input on conflict. |
@@ -230,11 +244,14 @@ stackman gh discover-mine --apply
 
 # Rebase the whole stack onto the latest parents, resolving conflicts with Claude
 stackman sync feature --resolver "claude -p @prompt"
+
+# Or preserve PR commit identities with parent merges
+stackman sync feature --strategy merge --resolver "claude -p @prompt"
 ```
 
-That's the full loop. `forget --all` clears stale tracking (merged PRs, renamed branches); `discover-mine` rebuilds it from GitHub in one shot; `sync` rebases every branch in the stack, in order, onto its parent's latest tip.
+That's the full loop. `forget --all` clears stale tracking (merged PRs, renamed branches); `discover-mine` rebuilds it from GitHub in one shot; `sync` updates every branch in the stack, in order, onto its parent's latest tip.
 
-Every step is non-interactive. No TTY is required, and `--resolver` settles conflicts without a human at the terminal, so the entire rebase runs unattended. An agent session can finish its edits, run `stackman sync --resolver "claude -p @prompt"` as its last step, and get a fully rebased, force-pushed stack without ever pausing for an interactive prompt or a manual `git rebase --continue`. The stack updates underneath you; nothing waits on input.
+Every step is non-interactive. No TTY is required, and `--resolver` settles conflicts without a human at the terminal, so either strategy can run unattended. An agent session can finish its edits, run `stackman sync --strategy merge --resolver "claude -p @prompt"` as its last step, and get a fully updated stack without pausing for an interactive prompt.
 
 ### `stackman show-resolver-prompt [--template]`
 
@@ -247,21 +264,21 @@ stackman show-resolver-prompt --template
 
 ## Conflict Resolution
 
-`stackman sync` rebases your branches. When a rebase hits a conflict, you resolve it one of two ways.
+`stackman sync` updates your branches using the selected strategy. When a rebase or merge hits a conflict, you resolve it one of two ways.
 
 ### Interactive (default)
 
 Stackman waits while you resolve manually:
 
 ```
-[stackman] Resolve conflicts, run `git rebase --continue` or `git rebase --abort`, then press Enter to resume.
+[stackman] Resolve conflicts, run `git <strategy> --continue` or `git <strategy> --abort`, then press Enter to resume.
 ```
 
-Resolve, run `git rebase --continue`, press Enter.
+Resolve, run `git rebase --continue` or `git merge --continue`, then press Enter.
 
 ### Automatic with a resolver
 
-Set `STACKMAN_RESOLVER` (or pass `--resolver`) to a command that reads the conflict context from environment variables, resolves, and runs `git rebase --continue` (or exits non-zero to abort).
+Set `STACKMAN_RESOLVER` (or pass `--resolver`) to a command that reads the conflict context from environment variables, resolves, and runs the selected operation's `--continue` command (or exits non-zero to abort).
 
 ```bash
 export STACKMAN_RESOLVER="claude -p @prompt"
@@ -303,12 +320,12 @@ When your resolver runs, it receives the conflict context as environment variabl
 
 | Variable | Contents |
 |----------|----------|
-| `STACKMAN_BRANCH` | Branch being rebased |
+| `STACKMAN_BRANCH` | Branch being updated |
 | `STACKMAN_PARENT` | Parent branch name |
 | `STACKMAN_PARENT_TIP` | SHA of parent's tip |
 | `STACKMAN_FORK_POINT` | SHA where branch forked from parent |
 | `STACKMAN_CONFLICTED_FILES` | Newline-separated list of conflicted files |
-| `STACKMAN_OPERATION` | Always `"rebase"` |
+| `STACKMAN_OPERATION` | Selected operation: `rebase` or `merge` |
 | `STACKMAN_REPO_URL` | Origin URL (if configured) |
 | `STACKMAN_PARENT_PR_NUMBER` | GitHub PR number for parent (if available) |
 | `STACKMAN_PR_NUMBER` | GitHub PR number for branch (if available) |
@@ -334,13 +351,13 @@ Every command is fully non-interactive; a TTY is never required. Add `--json` to
 No. It only records parent/fork-point metadata. Git branches are never modified.
 
 **What if I push a branch manually between syncs?**
-The fork-point doesn't change. The next sync rebases onto the parent's current tip and uses `--force-with-lease`, so it fails safely if someone else pushed.
+The fork-point doesn't change. The next sync uses the selected strategy. Merge mode uses a normal push, which fails safely if the remote branch has diverged.
 
 **Can I use Stackman with multiple worktrees?**
 Yes. All worktrees of a repo share the same database, so you can sync from any worktree.
 
 **What if my resolver fails?**
-The rebase is aborted and `stackman sync` exits non-zero. You resolve manually and retry.
+The selected operation is aborted and `stackman sync` exits non-zero. You resolve manually and retry.
 
 **How do I stop using Stackman?**
 Run `stackman forget --all`. Your Git branches are unaffected.

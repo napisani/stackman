@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from .command_support import emit as _emit
 from .conflict_resolver import RebaseConflictContext, resolve_rebase_conflict
@@ -16,7 +17,10 @@ from .git_ops import (
     has_remote,
     is_ancestor,
     merge_base,
+    merge_in_progress_any_linked,
+    merge_parent,
     pull_ff_only,
+    push_current_branch,
     push_force_with_lease_current_branch,
     rebase_in_progress_any_linked,
     rebase_onto,
@@ -50,6 +54,7 @@ from .sync_plan import SyncPlan, build_sync_plan
 class SyncOptions:
     """Named options shared by single-stack and conflict-selected sync workflows."""
 
+    strategy: Literal["rebase", "merge"] = "rebase"
     dry_run: bool = False
     verbose: bool = False
     squash: bool = False
@@ -129,8 +134,12 @@ def prepare_sync(ctx: AppContext, *, branch: str | None) -> PreparedSync:
 
 
 def validate_sync_options(options: SyncOptions) -> None:
+    if options.strategy not in ("rebase", "merge"):
+        raise SystemExit(f"Unsupported sync strategy: {options.strategy!r}.")
     if options.allow_dirty and options.squash:
         raise SystemExit("`--allow-dirty` cannot be combined with `--squash`.")
+    if options.strategy == "merge" and options.squash:
+        raise SystemExit("`--strategy merge` cannot be combined with `--squash`.")
 
 
 def preflight_sync(ctx: AppContext, prepared: PreparedSync, options: SyncOptions) -> None:
@@ -141,7 +150,7 @@ def preflight_sync(ctx: AppContext, prepared: PreparedSync, options: SyncOptions
         _emit(
             ctx,
             "[stackman] Warning: --allow-dirty skips the dirty-worktree preflight; "
-            "Git may still abort checkout or rebase.",
+            "Git may still abort checkout or the selected operation.",
         )
         return
 
@@ -175,6 +184,7 @@ def execute_prepared_sync(
             prepared.plan,
             prepared.all_branches,
             prepared.worktree,
+            strategy=options.strategy,
             squash=options.squash,
         )
 
@@ -186,6 +196,7 @@ def execute_prepared_sync(
         prepared.worktree,
         prepared.repo_key,
         prepared.original_branch,
+        strategy=options.strategy,
         squash=options.squash,
         verbose=options.verbose,
         resolver=options.resolver,
@@ -242,13 +253,15 @@ def _run_dry_run(
     all_branches: list[BranchRecord],
     worktree: Path,
     *,
+    strategy: Literal["rebase", "merge"],
     squash: bool,
 ) -> int:
     _emit(
         ctx,
         "[stackman] Planned steps (each branch: checkout"
         + (" → optional squash" if squash else "")
-        + " → rebase --onto parent tip → push)",
+        + (" → rebase --onto parent tip" if strategy == "rebase" else " → merge parent tip")
+        + " → push)",
     )
     for branch_name in plan.order:
         record = next(b for b in all_branches if b.branch_name == branch_name)
@@ -259,7 +272,8 @@ def _run_dry_run(
             wt_hint = f" (checkout in {holder})"
         _emit(
             ctx,
-            f"  - {branch_name}: rebase onto tip of {parent!r} "
+            f"  - {branch_name}: "
+            f"{('rebase onto' if strategy == 'rebase' else 'merge')} tip of {parent!r} "
             f"(stored fork-point {record.fork_point_sha[:7]}){wt_hint}",
         )
         if squash:
@@ -287,6 +301,7 @@ def _apply_sync(
     repo_key: str,
     original_branch: str,
     *,
+    strategy: Literal["rebase", "merge"],
     squash: bool,
     verbose: bool,
     resolver: str | None = None,
@@ -303,6 +318,7 @@ def _apply_sync(
                 plan=plan,
                 worktree=worktree,
                 repo_key=repo_key,
+                strategy=strategy,
                 squash=squash,
                 verbose=verbose,
                 resolver=resolver,
@@ -313,6 +329,7 @@ def _apply_sync(
     finally:
         if (
             not rebase_in_progress_any_linked(worktree)
+            and not merge_in_progress_any_linked(worktree)
             and current_branch(worktree) != original_branch
         ):
             _emit(ctx, f"[stackman] Restoring previous branch {original_branch!r}")
@@ -329,13 +346,14 @@ def _sync_one_branch(
     plan: SyncPlan,
     worktree: Path,
     repo_key: str,
+    strategy: Literal["rebase", "merge"],
     squash: bool,
     verbose: bool,
     resolver: str | None = None,
     no_wait: bool = False,
     use_origin_anchor: bool,
 ) -> bool:
-    """Rebase + push one branch. Returns True to continue, False to abort the sync."""
+    """Update + push one branch. Returns True to continue, False to abort the sync."""
     branch_name = record.branch_name
     parent_name = _sync_parent_name(plan, record)
     if parent_name is None:
@@ -343,8 +361,8 @@ def _sync_one_branch(
         return True
 
     # Interactive conflict resolution must happen in the invoking worktree so
-    # the user's `git rebase --continue` operates on the rebase Stackman began.
-    # Resolver and explicitly non-interactive runs can remain isolated.
+    # the user's `git <operation> --continue` operates on the operation Stackman
+    # began. Resolver and explicitly non-interactive runs can remain isolated.
     existing_wt = worktree_path_for_branch(worktree, branch_name)
     use_invoking_worktree = resolver is None and not no_wait and hasattr(ctx.stdin, "readline")
     temp_wt = None
@@ -360,7 +378,8 @@ def _sync_one_branch(
         _emit(ctx, f"[stackman] → Checking out {branch_name!r}")
         checkout(branch_wt, branch_name)
     else:
-        temp_wt = worktree.parent / f"{worktree.name}__rebase__{branch_name}"
+        operation = strategy
+        temp_wt = worktree.parent / f"{worktree.name}__{operation}__{branch_name}"
         branch_wt = temp_wt
 
         _emit(
@@ -379,68 +398,108 @@ def _sync_one_branch(
         parent_tip = rev_parse(branch_wt, parent_ref)
         upstream = record.fork_point_sha
 
-        # A parent rebased earlier in this sync no longer contains the stored
-        # fork-point, but the child still does; that old parent tip is exactly
-        # the boundary Git must replay from. Recalculate only when the branch
-        # itself no longer contains the boundary.
-        if not is_ancestor(branch_wt, upstream, branch_name):
-            _emit(
-                ctx,
-                f"[stackman] ⚠️  Fork-point {upstream[:7]} is no longer an ancestor of {branch_name!r}. "
-                "Recalculating (the branch may have been rewritten).",
-            )
-            upstream = merge_base(branch_wt, branch_name, parent_ref)
-            _emit(
-                ctx,
-                f"[stackman]    Recalculated fork-point: {upstream[:7]}",
-            )
-            # Update the record to avoid repeated recalculation on future syncs
-            update_branch_fork_point(
-                ctx.db_path,
-                repo_root=repo_key,
-                branch_name=branch_name,
-                fork_point_sha=upstream,
-            )
-
-        if squash and not _squash_branch(ctx, branch_wt, branch_name, upstream):
-            return False
-
-        if upstream != parent_tip:
-            if verbose:
+        if strategy == "merge":
+            if not is_ancestor(branch_wt, upstream, parent_ref):
+                ctx.stderr.write(
+                    f"[stackman] Cannot merge rewritten parent {parent_name!r} into "
+                    f"{branch_name!r}: stored fork-point {upstream[:7]} is not in the parent history.\n"
+                )
+                return False
+            if is_ancestor(branch_wt, parent_tip, branch_name):
                 _emit(
                     ctx,
-                    f"[stackman]   git rebase --onto {parent_tip} {upstream} "
-                    f"(replay commits after stored fork-point onto current {parent_name!r})",
+                    f"[stackman]   Skipping {branch_name!r}; current {parent_name!r} tip "
+                    f"{parent_tip[:7]} is already an ancestor",
                 )
-            _emit(
-                ctx,
-                f"[stackman]   Rebasing {branch_name!r} onto {parent_name!r} "
-                f"at {parent_tip[:7]} (fork-point {upstream[:7]})",
-            )
-            result = rebase_onto(branch_wt, onto=parent_tip, upstream=upstream)
-            if result.returncode != 0:
-                ctx.stderr.write(f"[stackman] Rebase failed on {branch_name!r}.\n")
-                conflict_ctx = RebaseConflictContext(
-                    branch_name=branch_name,
-                    branch_wt=branch_wt,
-                    parent_name=parent_name,
-                    parent_tip=parent_tip,
-                    fork_point=upstream,
-                )
-                resolution = resolve_rebase_conflict(
+            else:
+                if verbose:
+                    _emit(
+                        ctx,
+                        f"[stackman]   git merge --no-edit {parent_tip} "
+                        f"(merge current {parent_name!r} tip)",
+                    )
+                _emit(
                     ctx,
-                    conflict_ctx,
-                    resolver=resolver,
-                    no_wait=no_wait,
+                    f"[stackman]   Merging {parent_name!r} into {branch_name!r} "
+                    f"at {parent_tip[:7]}",
                 )
-                if resolution.status != "success":
-                    return False
+                result = merge_parent(branch_wt, parent_ref)
+                if result.returncode != 0:
+                    ctx.stderr.write(f"[stackman] Merge failed on {branch_name!r}.\n")
+                    conflict_ctx = RebaseConflictContext(
+                        branch_name=branch_name,
+                        branch_wt=branch_wt,
+                        parent_name=parent_name,
+                        parent_tip=parent_tip,
+                        fork_point=upstream,
+                        operation="merge",
+                    )
+                    resolution = resolve_rebase_conflict(
+                        ctx,
+                        conflict_ctx,
+                        resolver=resolver,
+                        no_wait=no_wait,
+                    )
+                    if resolution.status != "success":
+                        return False
         else:
-            _emit(
-                ctx,
-                f"[stackman]   Skipping {branch_name!r}; stored fork-point already matches "
-                f"current {parent_name!r} tip {parent_tip[:7]}",
-            )
+            # A parent rebased earlier in this sync no longer contains the
+            # stored fork-point, but the child still does; that old parent tip
+            # is exactly the boundary Git must replay from.
+            if not is_ancestor(branch_wt, upstream, branch_name):
+                _emit(
+                    ctx,
+                    f"[stackman] ⚠️  Fork-point {upstream[:7]} is no longer an ancestor of {branch_name!r}. "
+                    "Recalculating (the branch may have been rewritten).",
+                )
+                upstream = merge_base(branch_wt, branch_name, parent_ref)
+                _emit(ctx, f"[stackman]    Recalculated fork-point: {upstream[:7]}")
+                update_branch_fork_point(
+                    ctx.db_path,
+                    repo_root=repo_key,
+                    branch_name=branch_name,
+                    fork_point_sha=upstream,
+                )
+
+            if squash and not _squash_branch(ctx, branch_wt, branch_name, upstream):
+                return False
+
+            if upstream != parent_tip:
+                if verbose:
+                    _emit(
+                        ctx,
+                        f"[stackman]   git rebase --onto {parent_tip} {upstream} "
+                        f"(replay commits after stored fork-point onto current {parent_name!r})",
+                    )
+                _emit(
+                    ctx,
+                    f"[stackman]   Rebasing {branch_name!r} onto {parent_name!r} "
+                    f"at {parent_tip[:7]} (fork-point {upstream[:7]})",
+                )
+                result = rebase_onto(branch_wt, onto=parent_tip, upstream=upstream)
+                if result.returncode != 0:
+                    ctx.stderr.write(f"[stackman] Rebase failed on {branch_name!r}.\n")
+                    conflict_ctx = RebaseConflictContext(
+                        branch_name=branch_name,
+                        branch_wt=branch_wt,
+                        parent_name=parent_name,
+                        parent_tip=parent_tip,
+                        fork_point=upstream,
+                    )
+                    resolution = resolve_rebase_conflict(
+                        ctx,
+                        conflict_ctx,
+                        resolver=resolver,
+                        no_wait=no_wait,
+                    )
+                    if resolution.status != "success":
+                        return False
+            else:
+                _emit(
+                    ctx,
+                    f"[stackman]   Skipping {branch_name!r}; stored fork-point already matches "
+                    f"current {parent_name!r} tip {parent_tip[:7]}",
+                )
 
         # The branch is now based on parent_tip; record that (safe to persist before the
         # push because the push decision below is driven by the actual local↔remote diff,
@@ -452,7 +511,7 @@ def _sync_one_branch(
             fork_point_sha=parent_tip,
         )
 
-        return _push_if_needed(ctx, branch_wt, branch_name)
+        return _push_if_needed(ctx, branch_wt, branch_name, strategy=strategy)
     finally:
         # Clean up temporary worktree if we created one
         if temp_wt is not None:
@@ -489,7 +548,13 @@ def _squash_branch(ctx: AppContext, branch_wt: Path, branch_name: str, upstream:
     return True
 
 
-def _push_if_needed(ctx: AppContext, branch_wt: Path, branch_name: str) -> bool:
+def _push_if_needed(
+    ctx: AppContext,
+    branch_wt: Path,
+    branch_name: str,
+    *,
+    strategy: Literal["rebase", "merge"],
+) -> bool:
     """Push only when the local branch actually differs from its upstream."""
     remote_ref = upstream_branch(branch_wt, branch_name)
     if remote_ref is None:
@@ -503,11 +568,18 @@ def _push_if_needed(ctx: AppContext, branch_wt: Path, branch_name: str) -> bool:
             f"[stackman]   Remote {remote_ref} already up to date for {branch_name!r}; skipping push.",
         )
         return True
-    _emit(
-        ctx,
-        f"[stackman]   Pushing {branch_name!r} with --force-with-lease (upstream {remote_ref})",
-    )
-    push_result = push_force_with_lease_current_branch(branch_wt)
+    if strategy == "merge":
+        _emit(
+            ctx,
+            f"[stackman]   Pushing {branch_name!r} normally (upstream {remote_ref})",
+        )
+        push_result = push_current_branch(branch_wt)
+    else:
+        _emit(
+            ctx,
+            f"[stackman]   Pushing {branch_name!r} with --force-with-lease (upstream {remote_ref})",
+        )
+        push_result = push_force_with_lease_current_branch(branch_wt)
     if push_result.returncode != 0:
         msg = (push_result.stderr or "").strip() or (push_result.stdout or "").strip()
         ctx.stderr.write(

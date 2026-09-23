@@ -49,20 +49,26 @@ def ensure_ref_name_safe(name: str) -> None:
         )
 
 
-def rebase_in_progress(cwd: Path) -> bool:
-    """Detect rebase state in this checkout (main or linked worktree)."""
+def _git_path_exists(cwd: Path, path_name: str, *, directory: bool = False) -> bool:
     try:
-        rel_m = git_output(cwd, "rev-parse", "--git-path", "rebase-merge")
-        rel_a = git_output(cwd, "rev-parse", "--git-path", "rebase-apply")
+        path = Path(git_output(cwd, "rev-parse", "--git-path", path_name))
     except subprocess.CalledProcessError:
         return False
-    mpath = Path(rel_m)
-    apath = Path(rel_a)
-    if not mpath.is_absolute():
-        mpath = (cwd / mpath).resolve()
-    if not apath.is_absolute():
-        apath = (cwd / apath).resolve()
-    return mpath.is_dir() or apath.is_dir()
+    if not path.is_absolute():
+        path = (cwd / path).resolve()
+    return path.is_dir() if directory else path.exists()
+
+
+def rebase_in_progress(cwd: Path) -> bool:
+    """Detect rebase state in this checkout (main or linked worktree)."""
+    return _git_path_exists(cwd, "rebase-merge", directory=True) or _git_path_exists(
+        cwd, "rebase-apply", directory=True
+    )
+
+
+def merge_in_progress(cwd: Path) -> bool:
+    """Detect an in-progress merge in this checkout (main or linked worktree)."""
+    return _git_path_exists(cwd, "MERGE_HEAD")
 
 
 def iter_worktree_entries(cwd: Path) -> list[tuple[Path, str | None]]:
@@ -97,6 +103,11 @@ def worktree_path_for_branch(cwd: Path, branch: str) -> Path | None:
 def rebase_in_progress_any_linked(cwd: Path) -> bool:
     """True if a rebase is in progress in any worktree of this repository."""
     return any(rebase_in_progress(path) for path, _ in iter_worktree_entries(cwd))
+
+
+def merge_in_progress_any_linked(cwd: Path) -> bool:
+    """True if a merge is in progress in any worktree of this repository."""
+    return any(merge_in_progress(path) for path, _ in iter_worktree_entries(cwd))
 
 
 def sync_relevant_worktrees(start_worktree: Path, branch_names: Sequence[str]) -> list[Path]:
@@ -154,6 +165,12 @@ def rebase_onto(
     if not update_refs:
         args = ("-c", "rebase.updateRefs=false", *args)
     return _run_git(cwd, *args, check=False)
+
+
+def merge_parent(cwd: Path, parent: str) -> subprocess.CompletedProcess[str]:
+    """Merge a parent ref into the current branch without opening an editor."""
+    ensure_ref_name_safe(parent)
+    return _run_git(cwd, "merge", "--no-edit", parent, check=False)
 
 
 def commits_since(cwd: Path, upstream: str, *, ref: str = "HEAD") -> list[str]:
@@ -231,6 +248,16 @@ def remote_tracking_branch(cwd: Path, remote: str, branch: str) -> str | None:
 def push_force_with_lease_current_branch(cwd: Path) -> subprocess.CompletedProcess[str]:
     """Push current HEAD using its configured @{upstream} (if any)."""
     return _run_git(cwd, "push", "--force-with-lease", check=False)
+
+
+def push_current_branch(cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Push current HEAD using its configured @{upstream} without rewriting it."""
+    return _run_git(cwd, "push", check=False)
+
+
+def abort_merge(cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Abort an in-progress merge."""
+    return _run_git(cwd, "merge", "--abort", check=False)
 
 
 def repo_root(cwd: Path) -> Path:

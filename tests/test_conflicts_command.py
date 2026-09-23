@@ -49,6 +49,33 @@ def test_conflicts_reports_a_predicted_rebase_conflict_without_rewriting_branche
     assert git_repo.rev_parse("feature") == feature_before
 
 
+def test_conflicts_can_predict_merge_conflicts_without_rewriting_branches(
+    git_repo,
+    stackman_db_path,
+) -> None:
+    git_repo.commit("shared base", filename="shared.txt", content="base\n")
+    git_repo.checkout_new("feature", from_ref="main")
+    git_repo.commit("feature changes shared", filename="shared.txt", content="feature\n")
+    fork = git_repo.merge_base("feature", "main")
+    _track_branch(stackman_db_path, git_repo, "feature", "main", fork, "stack-merge-conflict")
+
+    git_repo.checkout("main")
+    git_repo.commit("main changes shared", filename="shared.txt", content="main\n")
+
+    stdout = io.StringIO()
+    app = StackmanApp(
+        db_path=stackman_db_path,
+        cwd=git_repo.root,
+        stdin=io.StringIO(""),
+        stdout=stdout,
+        stderr=io.StringIO(),
+    )
+
+    assert app.conflicts(strategy="merge") == 1
+    assert "conflicts merging onto main" in stdout.getvalue()
+    assert "shared.txt" in stdout.getvalue()
+
+
 def test_conflicts_json_reports_a_clean_stack(
     git_repo,
     stackman_db_path,

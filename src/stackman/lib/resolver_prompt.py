@@ -11,13 +11,13 @@ from collections.abc import Mapping
 
 # The default conflict resolution prompt template.
 # All environment variables are templated as {VAR_NAME} for easy substitution.
-DEFAULT_CONFLICT_RESOLUTION_PROMPT = """You are resolving merge conflicts during an unattended Git rebase.
+DEFAULT_CONFLICT_RESOLUTION_PROMPT = """You are resolving merge conflicts during an unattended Git {STACKMAN_OPERATION}.
 
 ## Context
-Branch being rebased: {STACKMAN_BRANCH}
+Branch being updated: {STACKMAN_BRANCH}
 Parent branch: {STACKMAN_PARENT}
 Parent branch tip: {STACKMAN_PARENT_TIP}
-Fork point (rebase upstream): {STACKMAN_FORK_POINT}
+Fork point: {STACKMAN_FORK_POINT}
 Conflicted files:
 {STACKMAN_CONFLICTED_FILES}
 
@@ -33,6 +33,8 @@ For EACH conflicted file:
 
 1. **Read the conflict markers** (<<<<<<, ======, >>>>>>>)
    - Understand what each side is trying to do
+   - For a merge, "ours" is the current branch and "theirs" is the parent being merged
+   - For a rebase, "ours" is the parent tip and "theirs" is the commit being replayed
    - Read the code context to grasp both intents
 
 2. **Merge intentionally**
@@ -52,15 +54,15 @@ For EACH conflicted file:
    - Run: git add <file>
 
 6. **After all files are resolved**
-   - Run: git rebase --continue
-   - Rebase should complete cleanly with no further conflicts
+   - Run: git {STACKMAN_OPERATION} --continue
+   - The operation should complete cleanly with no further conflicts
 
 ## Exit Criteria
 
 ### Success (exit 0)
 - All conflicts resolved intentionally
 - All files staged with git add
-- Rebase continued and completed
+- The selected operation continued and completed
 - No uncommitted changes remain
 - Working tree is clean
 
@@ -77,7 +79,7 @@ For EACH conflicted file:
 You are resolving conflicts unattended. Better to fail safely than to guess wrong and break the codebase.
 
 If a conflict seems risky or unclear:
-1. Run: git rebase --abort
+1. Let Stackman abort the selected operation
 2. Exit with code 1
 3. The user will manually review and resolve
 
@@ -85,14 +87,14 @@ If a conflict seems risky or unclear:
 
 **On Success:**
 ```bash
-git rebase --continue
-# (wait for rebase to complete)
+git {STACKMAN_OPERATION} --continue
+# (wait for the operation to complete)
 exit 0
 ```
 
 **On Failure (unsafe):**
 ```bash
-git rebase --abort
+# Let Stackman abort the selected operation
 exit 1
 ```
 

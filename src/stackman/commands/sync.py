@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from ..lib.context import AppContext
 from ..lib.sync_workflow import SyncOptions, sync_one
 
@@ -8,6 +10,7 @@ def run(
     ctx: AppContext,
     *,
     branch: str | None,
+    strategy: Literal["rebase", "merge"],
     dry_run: bool,
     verbose: bool,
     squash: bool,
@@ -21,6 +24,7 @@ def run(
         ctx,
         branch=branch,
         options=SyncOptions(
+            strategy=strategy,
             dry_run=dry_run,
             verbose=verbose,
             squash=squash,

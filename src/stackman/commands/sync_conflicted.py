@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from ..lib.command_support import emit as _emit
 from ..lib.conflict_prediction import probe_all, report_lines
 from ..lib.context import AppContext
@@ -18,6 +20,7 @@ from ..lib.sync_workflow import (
 def run(
     ctx: AppContext,
     *,
+    strategy: Literal["rebase", "merge"],
     dry_run: bool,
     verbose: bool,
     squash: bool,
@@ -26,8 +29,9 @@ def run(
     no_wait: bool = False,
     no_fetch_and_pull: bool = False,
 ) -> int:
-    """Probe all stacks, then sync only the stacks with predicted rebases conflicts."""
+    """Probe all stacks, then sync only the stacks with predicted conflicts."""
     options = SyncOptions(
+        strategy=strategy,
         dry_run=dry_run,
         verbose=verbose,
         squash=squash,
@@ -44,16 +48,22 @@ def run(
     use_origin_anchor = (
         False if options.dry_run else fetch_origin(ctx, worktree, skip=options.no_fetch_and_pull)
     )
-    reports = probe_all(ctx.db_path, worktree, branches, fresh_origin=use_origin_anchor)
+    reports = probe_all(
+        ctx.db_path,
+        worktree,
+        branches,
+        fresh_origin=use_origin_anchor,
+        strategy=strategy,
+    )
     probe_errors = [report for report in reports if report.status == "probe_error"]
     if probe_errors:
-        for line in report_lines(reports):
+        for line in report_lines(reports, strategy=strategy):
             _emit(ctx, line)
         return 2
 
     conflicted = [report for report in reports if report.status == "conflict"]
     if not conflicted:
-        _emit(ctx, "No predicted rebase conflicts.")
+        _emit(ctx, f"No predicted {strategy} conflicts.")
         return 0
 
     prepared = [

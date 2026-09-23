@@ -4,6 +4,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import click
 
@@ -141,7 +142,7 @@ def cli(ctx: click.Context, db_path: Path, repo_path: Path | None) -> None:
       stackman track --parent main          # track the current branch onto main
       stackman chain main a b c             # record an existing linear stack
       stackman list                         # show the stack tree for this repo
-      stackman conflicts                    # predict rebases that would conflict
+      stackman conflicts                    # predict sync conflicts
       stackman sync-conflicted               # sync every stack predicted to conflict
       stackman sync feature                 # rebase the whole stack containing 'feature'
       stackman done feature                 # feature landed; lift its children up
@@ -183,6 +184,13 @@ def chain(cfg: CliConfig, anchor: str, branches: tuple[str, ...], db_path, repo_
 
 
 @cli.command("conflicts")
+@click.option(
+    "--strategy",
+    type=click.Choice(["rebase", "merge"]),
+    default="rebase",
+    show_default=True,
+    help="Operation to predict conflicts for.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Write every stack result as JSON.")
 @click.option(
     "--no-fetch-and-pull",
@@ -192,14 +200,32 @@ def chain(cfg: CliConfig, anchor: str, branches: tuple[str, ...], db_path, repo_
 @repo_options
 @click.pass_obj
 def conflicts_command(
-    cfg: CliConfig, as_json: bool, no_fetch_and_pull: bool, db_path, repo_path
+    cfg: CliConfig,
+    strategy: Literal["rebase", "merge"],
+    as_json: bool,
+    no_fetch_and_pull: bool,
+    db_path,
+    repo_path,
 ) -> None:
-    """Predict rebase conflicts across every tracked stack in this repository."""
+    """Predict conflicts for the selected operation across every tracked stack."""
     app = cfg.resolve(db_path, repo_path)
-    raise SystemExit(app.conflicts(as_json=as_json, no_fetch_and_pull=no_fetch_and_pull))
+    raise SystemExit(
+        app.conflicts(
+            strategy=strategy,
+            as_json=as_json,
+            no_fetch_and_pull=no_fetch_and_pull,
+        )
+    )
 
 
 @cli.command("sync-conflicted")
+@click.option(
+    "--strategy",
+    type=click.Choice(["rebase", "merge"]),
+    default="rebase",
+    show_default=True,
+    help="Operation to use when syncing predicted conflicts.",
+)
 @click.option(
     "--dry-run",
     is_flag=True,
@@ -209,17 +235,17 @@ def conflicts_command(
     "-v",
     "--verbose",
     is_flag=True,
-    help="Print the exact git rebase command implied for each branch.",
+    help="Print the exact Git operation implied for each branch.",
 )
 @click.option(
     "--squash",
     is_flag=True,
-    help="Squash 2+ commits after the fork-point into one before rebasing each branch.",
+    help="Squash 2+ commits after the fork-point into one before updating each branch.",
 )
 @click.option(
     "--allow-dirty",
     is_flag=True,
-    help="Skip dirty-worktree preflight; Git may still abort checkout or rebase.",
+    help="Skip dirty-worktree preflight; Git may still abort checkout or the selected operation.",
 )
 @click.option(
     "--no-fetch-and-pull",
@@ -241,6 +267,7 @@ def conflicts_command(
 @click.pass_obj
 def sync_conflicted_command(
     cfg: CliConfig,
+    strategy: Literal["rebase", "merge"],
     dry_run: bool,
     verbose: bool,
     squash: bool,
@@ -251,11 +278,12 @@ def sync_conflicted_command(
     db_path,
     repo_path,
 ) -> None:
-    """Sync every tracked stack whose predictive rebase probe finds a conflict."""
+    """Sync every tracked stack whose predictive probe finds a conflict."""
     app = cfg.resolve(db_path, repo_path)
     resolver = resolver or os.environ.get("STACKMAN_RESOLVER")
     raise SystemExit(
         app.sync_conflicted(
+            strategy=strategy,
             dry_run=dry_run,
             verbose=verbose,
             squash=squash,
@@ -270,6 +298,13 @@ def sync_conflicted_command(
 @cli.command("sync")
 @click.argument("branch", required=False, shell_complete=_complete_tracked_branches)
 @click.option(
+    "--strategy",
+    type=click.Choice(["rebase", "merge"]),
+    default="rebase",
+    show_default=True,
+    help="Operation to use when syncing the stack.",
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     help="Show the resolved sync set and planned steps without modifying the repository.",
@@ -278,17 +313,17 @@ def sync_conflicted_command(
     "-v",
     "--verbose",
     is_flag=True,
-    help="Print the exact git rebase command implied for each branch.",
+    help="Print the exact Git operation implied for each branch.",
 )
 @click.option(
     "--squash",
     is_flag=True,
-    help="Squash 2+ commits after the stored fork-point into one commit before rebasing each branch.",
+    help="Squash 2+ commits after the stored fork-point into one commit before updating each branch.",
 )
 @click.option(
     "--allow-dirty",
     is_flag=True,
-    help="Skip dirty-worktree preflight; Git may still abort checkout or rebase.",
+    help="Skip dirty-worktree preflight; Git may still abort checkout or the selected operation.",
 )
 @click.option(
     "--no-fetch-and-pull",
@@ -311,6 +346,7 @@ def sync_conflicted_command(
 def sync_command(
     cfg: CliConfig,
     branch: str | None,
+    strategy: Literal["rebase", "merge"],
     dry_run: bool,
     verbose: bool,
     squash: bool,
@@ -325,7 +361,7 @@ def sync_command(
 
     Use --resolver <cmd> to enable non-interactive conflict resolution. The resolver
     command receives conflict context via environment variables and should complete
-    the rebase (run `git rebase --continue`) or exit nonzero to signal failure.
+    the selected operation or exit nonzero to signal failure.
     Use @prompt in the command to inject the default conflict resolution prompt.
 
     Examples:
@@ -340,6 +376,7 @@ def sync_command(
     raise SystemExit(
         app.sync(
             branch=branch,
+            strategy=strategy,
             dry_run=dry_run,
             verbose=verbose,
             squash=squash,

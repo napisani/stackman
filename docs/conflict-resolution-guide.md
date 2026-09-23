@@ -1,7 +1,7 @@
 # Conflict Resolution Guide
 
-When `stackman sync` encounters a rebase conflict, it can either:
-1. **Interactively** — wait for you to manually resolve and run `git rebase --continue`
+When `stackman sync` encounters a rebase or merge conflict, it can either:
+1. **Interactively** — wait for you to manually resolve and continue the selected Git operation
 2. **Automatically** — invoke a resolver command (e.g., an AI model) to resolve conflicts unattended
 
 ## Using the Built-in Prompt
@@ -127,12 +127,12 @@ stackman sync feature --resolver "~/.local/bin/resolve-conflicts-openai"
 When your resolver is invoked, stackman populates these environment variables:
 
 ### Required Context
-- `STACKMAN_BRANCH` — The branch being rebased
+- `STACKMAN_BRANCH` — The branch being updated
 - `STACKMAN_PARENT` — The parent branch
 - `STACKMAN_PARENT_TIP` — SHA of the parent branch tip
 - `STACKMAN_FORK_POINT` — SHA where the branch forked from parent
 - `STACKMAN_CONFLICTED_FILES` — Newline-separated list of conflicted files
-- `STACKMAN_OPERATION` — Always `"rebase"` (for future extensibility)
+- `STACKMAN_OPERATION` — Selected operation: `rebase` or `merge`
 
 ### Optional Context
 - `STACKMAN_REPO_URL` — Origin URL (if configured in Git)
@@ -143,27 +143,27 @@ When your resolver is invoked, stackman populates these environment variables:
 
 Your resolver **must** exit with:
 
-- **0 (success)** — All conflicts resolved, rebase completed, working tree clean
+- **0 (success)** — All conflicts resolved, the selected operation completed, working tree clean
   - The resolver should have:
     - Read each conflicted file
     - Resolved conflicts (removed markers)
     - Staged files with `git add <file>`
-    - Run `git rebase --continue` (and waited for it to complete)
+    - Run the selected operation's `--continue` command (and wait for it to complete)
     - Left the working tree clean
 
-- **1 (failure)** — Could not resolve safely, or rebase was aborted
+- **1 (failure)** — Could not resolve safely, or the operation was aborted
   - Use this when:
     - A conflict is ambiguous or unclear
     - Merging would break code logic
     - You're unsure about the safety of the resolution
-    - The resolver ran `git rebase --abort` due to safety concerns
+    - The resolver aborted the operation due to safety concerns
 
 ## Exit Criteria Checklist for Resolvers
 
 When exiting with 0 (success), the resolver **must verify**:
 
-1. ✓ No rebase is in progress (`git rebase --continue` completed)
-2. ✓ HEAD is at the target commit (all commits replayed)
+1. ✓ No operation is in progress (`git rebase --continue` or `git merge --continue` completed)
+2. ✓ The selected operation made the parent tip an ancestor of HEAD
 3. ✓ Working tree is clean (no uncommitted changes)
 4. ✓ All files have been staged (git status shows nothing)
 
@@ -238,7 +238,8 @@ Even with a resolver configured, you can always force interactive mode with `--n
 stackman sync feature --no-wait
 
 # Manual resolution
-git rebase --continue  # or git rebase --abort
+git rebase --continue  # or git merge --continue
+# use the matching --abort command if needed
 stackman sync feature  # retry
 ```
 
@@ -250,15 +251,15 @@ Stackman does not impose a timeout on the resolver — it waits until the
 resolver exits, so a hung resolver will block the sync indefinitely (interrupt
 it with Ctrl-C). Check that your resolver:
 
-1. Actually completes the rebase (`git rebase --continue`)
+1. Actually completes the selected operation (`git rebase --continue` or `git merge --continue`)
 2. Doesn't wait for interactive input after completing
 3. Exits cleanly with status 0 or 1
 
-### Resolver Exits 0 but Rebase Didn't Complete
+### Resolver Exits 0 but the Operation Didn't Complete
 
-Stackman validates that the rebase actually succeeded by checking:
-1. No rebase is in progress
-2. HEAD is at the target commit
+Stackman validates that the selected operation actually succeeded by checking:
+1. No operation is in progress
+2. The parent tip is an ancestor of HEAD
 3. Working tree is clean
 
 If any check fails, stackman returns an error even if the resolver exited 0. This is a safety feature.

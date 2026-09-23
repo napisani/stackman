@@ -41,14 +41,14 @@ class StackRecord:
 
 @dataclass(frozen=True)
 class ConflictResolutionResult:
-    """Result of attempting to resolve a merge conflict during a rebase.
+    """Result of attempting to resolve a merge conflict during sync.
 
     Attributes:
-        status: 'success' if rebase completed cleanly; 'failure' if resolver
-                exited nonzero or rebase ended in an invalid state; 'needs_manual'
-                if user aborted the rebase (interactive mode only).
+        status: 'success' if the operation completed cleanly; 'failure' if the
+                resolver exited nonzero or the operation ended in an invalid
+                state; 'needs_manual' if the user aborted it (interactive only).
         message: Human-readable summary of the result (e.g., error description,
-                 or "Rebase completed successfully").
+                 or "Operation completed successfully").
         resolver_output: Captured stdout/stderr from the resolver command,
                         if one was invoked (None for interactive mode).
     """

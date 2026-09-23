@@ -53,6 +53,7 @@ def test_conflicts_command_help() -> None:
 
     assert result.exit_code == 0
     assert "--json" in result.output
+    assert "--strategy" in result.output
     assert "--no-fetch-and-pull" in result.output
 
 
@@ -61,6 +62,7 @@ def test_sync_conflicted_command_help() -> None:
 
     assert result.exit_code == 0
     for option in (
+        "--strategy",
         "--dry-run",
         "--verbose",
         "--squash",
@@ -78,6 +80,7 @@ def test_sync_command_help() -> None:
 
     assert result.exit_code == 0
     assert "BRANCH" in result.output
+    assert "--strategy" in result.output
     assert "--dry-run" in result.output
     assert "--squash" in result.output
     assert "--allow-dirty" in result.output

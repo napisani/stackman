@@ -5,12 +5,15 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from .context import AppContext
 from .git_ops import (
+    abort_merge,
     get_git_config,
     get_pr_number,
     is_ancestor,
+    merge_in_progress,
     rebase_in_progress,
     worktree_dirty_preview,
 )
@@ -28,37 +31,50 @@ def _emit(ctx: AppContext, message: str) -> None:
 
 @dataclass
 class RebaseConflictContext:
-    """Context for a rebase conflict."""
+    """Context for a rebase or merge conflict."""
 
     branch_name: str
     branch_wt: Path
     parent_name: str
     parent_tip: str
     fork_point: str
+    operation: Literal["rebase", "merge"] = "rebase"
 
 
 class RebaseConflictValidator:
-    """Validates the state of an in-progress rebase.
+    """Validates the state of an in-progress rebase or merge.
 
-    Centralizes all rebase-state checks (is it complete? is the tree clean?)
-    so the same logic is used in both interactive and resolver-based paths.
+    The legacy class name remains for compatibility; checks are selected from
+    the operation stored in the conflict context.
     """
 
-    def __init__(self, branch_wt: Path, parent_tip: str):
+    def __init__(
+        self,
+        branch_wt: Path,
+        parent_tip: str,
+        operation: Literal["rebase", "merge"] = "rebase",
+    ):
         self.branch_wt = branch_wt
         self.parent_tip = parent_tip
+        self.operation = operation
 
-    def is_rebase_in_progress(self) -> bool:
-        """Check if a rebase is still in progress."""
+    def is_operation_in_progress(self) -> bool:
+        """Check if the selected Git operation is still in progress."""
+        if self.operation == "merge":
+            return merge_in_progress(self.branch_wt)
         return rebase_in_progress(self.branch_wt)
 
-    def is_rebase_complete(self) -> bool:
-        """Check if the rebase has completed successfully.
+    def is_rebase_in_progress(self) -> bool:
+        """Backward-compatible name for checking the selected operation state."""
+        return self.is_operation_in_progress()
 
-        Returns True if HEAD is an ancestor of parent_tip (the rebase target),
-        meaning all commits have been replayed.
-        """
+    def is_operation_complete(self) -> bool:
+        """Check whether the parent tip is now an ancestor of the branch."""
         return is_ancestor(self.branch_wt, self.parent_tip, "HEAD")
+
+    def is_rebase_complete(self) -> bool:
+        """Backward-compatible name for checking operation completion."""
+        return self.is_operation_complete()
 
     def working_tree_status(self) -> str | None:
         """Get a preview of uncommitted changes in the working tree.
@@ -71,30 +87,32 @@ class RebaseConflictValidator:
         """Check if the working tree has no uncommitted changes."""
         return self.working_tree_status() is None
 
-    def validate_rebase_success(self) -> tuple[bool, str | None]:
-        """Validate that a rebase that reported success (exit 0) actually succeeded.
+    def validate_operation_success(self) -> tuple[bool, str | None]:
+        """Validate that the selected Git operation completed successfully."""
+        operation = self.operation
+        continue_command = f"git {operation} --continue"
+        label = operation.capitalize()
+        if self.is_operation_in_progress():
+            return False, f"{label} is still in progress ({continue_command} needed)"
 
-        Returns (success: bool, error_message: str | None).
-        On success, returns (True, None).
-        On failure, returns (False, error_message) explaining what's wrong.
-        """
-        if self.is_rebase_in_progress():
-            return False, "Rebase is still in progress (git rebase --continue needed)"
-
-        if not self.is_rebase_complete():
-            return False, "Rebase did not complete (HEAD is not at the target commit)"
+        if not self.is_operation_complete():
+            return False, f"{label} did not complete (HEAD is not at the target commit)"
 
         if not self.is_working_tree_clean():
             return False, "Working tree has uncommitted changes"
 
         return True, None
 
+    def validate_rebase_success(self) -> tuple[bool, str | None]:
+        """Backward-compatible name for validating the selected operation."""
+        return self.validate_operation_success()
+
 
 class RebaseConflictResolution:
-    """Orchestrates conflict resolution during a rebase.
+    """Orchestrates conflict resolution for a rebase or merge.
 
-    Owns the decision logic for choosing between interactive and resolver-based
-    conflict resolution, environment preparation, and result validation.
+    The legacy class name remains for compatibility while operation-specific
+    commands and validation are selected from the conflict context.
     """
 
     def __init__(
@@ -108,15 +126,23 @@ class RebaseConflictResolution:
         self.conflict_ctx = conflict_ctx
         self.resolver = resolver
         self.no_wait = no_wait
-        self.validator = RebaseConflictValidator(conflict_ctx.branch_wt, conflict_ctx.parent_tip)
+        self.validator = RebaseConflictValidator(
+            conflict_ctx.branch_wt,
+            conflict_ctx.parent_tip,
+            conflict_ctx.operation,
+        )
 
     def resolve(self) -> ConflictResolutionResult:
-        """Attempt to resolve the conflict using the appropriate strategy.
+        """Attempt to resolve the conflict using the configured strategy.
 
         Returns ConflictResolutionResult with status in ["success", "failure", "needs_manual"].
         Priority: resolver > interactive > fail
         """
-        _emit(self.ctx, f"[stackman] Rebase conflict on {self.conflict_ctx.branch_name!r}.")
+        operation = self.conflict_ctx.operation
+        _emit(
+            self.ctx,
+            f"[stackman] {operation.capitalize()} conflict on {self.conflict_ctx.branch_name!r}.",
+        )
 
         # Try resolver path if configured (prioritize over interactive)
         if self.resolver:
@@ -130,7 +156,8 @@ class RebaseConflictResolution:
         self.ctx.stderr.write(
             "[stackman] Conflict resolution required but in non-interactive mode.\n"
             "[stackman] Use --resolver <cmd> to enable non-interactive conflict resolution, "
-            "or resolve manually and run `git rebase --continue`, then `stackman sync` again.\n"
+            f"or resolve manually and run `git {self.conflict_ctx.operation} --continue`, "
+            "then `stackman sync` again.\n"
         )
         return ConflictResolutionResult(
             status="failure",
@@ -144,41 +171,45 @@ class RebaseConflictResolution:
     def _try_interactive(self) -> ConflictResolutionResult:
         """Try interactive conflict resolution via stdin prompts."""
         while True:
+            operation = self.conflict_ctx.operation
             self.ctx.stdout.write(
-                "[stackman] Resolve conflicts, run `git rebase --continue` or `git rebase --abort`, "
-                "then press Enter to resume.\n"
+                f"[stackman] Resolve conflicts, run `git {operation} --continue` or "
+                f"`git {operation} --abort`, then press Enter to resume.\n"
             )
             self.ctx.stdout.flush()
             line = self.ctx.stdin.readline()
             if line == "":
+                operation = self.conflict_ctx.operation
                 self.ctx.stderr.write(
-                    "[stackman] Input closed while waiting for rebase resolution.\n"
+                    f"[stackman] Input closed while waiting for {operation} resolution.\n"
                 )
                 return ConflictResolutionResult(
                     status="failure",
-                    message="Input closed while waiting for rebase resolution",
+                    message=f"Input closed while waiting for {operation} resolution",
                 )
-            if self.validator.is_rebase_in_progress():
+            operation = self.conflict_ctx.operation
+            label = operation.capitalize()
+            if self.validator.is_operation_in_progress():
                 _emit(
                     self.ctx,
-                    f"[stackman] Rebase on {self.conflict_ctx.branch_name!r} is still in progress.",
+                    f"[stackman] {label} on {self.conflict_ctx.branch_name!r} is still in progress.",
                 )
                 continue
-            if self.validator.is_rebase_complete():
+            if self.validator.is_operation_complete():
                 _emit(
                     self.ctx,
-                    f"[stackman] Rebase on {self.conflict_ctx.branch_name!r} completed; resuming sync.",
+                    f"[stackman] {label} on {self.conflict_ctx.branch_name!r} completed; resuming sync.",
                 )
                 return ConflictResolutionResult(
                     status="success",
-                    message="Rebase completed successfully (interactive)",
+                    message=f"{label} completed successfully (interactive)",
                 )
             self.ctx.stderr.write(
-                f"[stackman] Rebase on {self.conflict_ctx.branch_name!r} was aborted.\n"
+                f"[stackman] {label} on {self.conflict_ctx.branch_name!r} was aborted.\n"
             )
             return ConflictResolutionResult(
                 status="needs_manual",
-                message="Rebase was aborted by user",
+                message=f"{label} was aborted by user",
             )
 
     def _try_resolver(self) -> ConflictResolutionResult:
@@ -197,6 +228,8 @@ def resolve_rebase_conflict(
 ) -> ConflictResolutionResult:
     """
     Resolve a rebase conflict, either interactively or via a resolver command.
+
+    The context may select merge mode for backwards-compatible callers.
 
     Backwards-compatibility shim: wraps RebaseConflictResolution class.
     Returns ConflictResolutionResult with status in ["success", "failure", "needs_manual"].
@@ -227,6 +260,7 @@ def _invoke_resolver(
         conflict_ctx.parent_tip,
         conflict_ctx.fork_point,
         conflicted_files,
+        operation=conflict_ctx.operation,
     )
 
     # Expand @prompt to the default conflict resolution prompt itself, as a single
@@ -269,7 +303,7 @@ def _invoke_resolver(
         )
     except Exception as e:
         ctx.stderr.write(f"[stackman] Resolver invocation failed: {e}\n")
-        _abort_rebase(conflict_ctx.branch_wt)
+        _abort_operation(conflict_ctx)
         return ConflictResolutionResult(
             status="failure",
             message=f"Resolver invocation failed: {e}",
@@ -286,19 +320,23 @@ def _invoke_resolver(
 
     if resolver_result.returncode != 0:
         ctx.stderr.write(f"[stackman] Resolver failed: exit code {resolver_result.returncode}\n")
-        _abort_rebase(conflict_ctx.branch_wt)
+        _abort_operation(conflict_ctx)
         return ConflictResolutionResult(
             status="failure",
             message=f"Resolver exited with code {resolver_result.returncode}",
             resolver_output=resolver_output if resolver_output else None,
         )
 
-    # Validate that the rebase actually succeeded (check end state)
-    validator = RebaseConflictValidator(conflict_ctx.branch_wt, conflict_ctx.parent_tip)
-    success, error_msg = validator.validate_rebase_success()
+    # Validate that the selected operation actually succeeded (check end state)
+    validator = RebaseConflictValidator(
+        conflict_ctx.branch_wt,
+        conflict_ctx.parent_tip,
+        conflict_ctx.operation,
+    )
+    success, error_msg = validator.validate_operation_success()
     if not success:
         ctx.stderr.write(f"[stackman] Resolver exited successfully but {error_msg}.\n")
-        _abort_rebase(conflict_ctx.branch_wt)
+        _abort_operation(conflict_ctx)
         return ConflictResolutionResult(
             status="failure",
             message=f"Resolver exited successfully but {error_msg}",
@@ -320,6 +358,8 @@ def _populate_resolver_env_vars(
     parent_tip: str,
     fork_point: str,
     conflicted_files: list[str],
+    *,
+    operation: Literal["rebase", "merge"] = "rebase",
 ) -> dict[str, str]:
     """Build environment variables for resolver invocation."""
     env_vars = {
@@ -328,7 +368,7 @@ def _populate_resolver_env_vars(
         "STACKMAN_PARENT_TIP": parent_tip,
         "STACKMAN_FORK_POINT": fork_point,
         "STACKMAN_CONFLICTED_FILES": "\n".join(conflicted_files),
-        "STACKMAN_OPERATION": "rebase",
+        "STACKMAN_OPERATION": operation,
     }
 
     # Optional: auto-discovered values
@@ -361,7 +401,7 @@ def _get_conflicted_files(cwd: Path) -> list[str]:
 
     conflicted = []
     for line in result.stdout.splitlines():
-        # Git merge conflict codes (git status --porcelain during rebase):
+        # Git conflict codes (git status --porcelain during either operation):
         # UU = both modified, UD = deleted by them, DU = deleted by us,
         # DD = both deleted, AU = added by them, UA = added by us, AA = both added
         if line and line[0:2] in ("UU", "UD", "DU", "DD", "AU", "UA", "AA"):
@@ -371,8 +411,21 @@ def _get_conflicted_files(cwd: Path) -> list[str]:
     return conflicted
 
 
+def _abort_operation(conflict_ctx: RebaseConflictContext) -> None:
+    """Abort the operation represented by a conflict context."""
+    if conflict_ctx.operation == "merge":
+        abort_merge(conflict_ctx.branch_wt)
+        return
+    subprocess.run(
+        ["git", "rebase", "--abort"],
+        cwd=conflict_ctx.branch_wt,
+        check=False,
+        capture_output=True,
+    )
+
+
 def _abort_rebase(cwd: Path) -> None:
-    """Abort an in-progress rebase."""
+    """Backward-compatible helper for aborting a rebase."""
     subprocess.run(
         ["git", "rebase", "--abort"],
         cwd=cwd,

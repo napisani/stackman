@@ -5,7 +5,7 @@
 
 ## Purpose
 
-`stackman` is a small CLI for local stacked-branch workflows. It tracks branch lineage in a SQLite database so a full stack can be rebased in the right order after an upstream branch moves.
+`stackman` is a small CLI for local stacked-branch workflows. It tracks branch lineage in a SQLite database so a full stack can be updated in the right order after an upstream branch moves.
 
 It complements normal Git usage: you still create branches with Git, resolve conflicts with Git, and push with Git. Stackman records enough metadata to make repeated stack syncs predictable.
 
@@ -19,7 +19,7 @@ stackman --version               # print version and exit
 stackman status [BRANCH] [--json]
 stackman track [BRANCH] --parent PARENT
 stackman chain ANCHOR BRANCH...
-stackman sync [BRANCH] [--allow-dirty] [--resolver CMD] [--no-wait]
+stackman sync [BRANCH] [--strategy rebase|merge] [--allow-dirty] [--resolver CMD] [--no-wait]
 stackman done [BRANCH]
 stackman list [--json]
 stackman forget [BRANCH]
@@ -143,19 +143,20 @@ Resolution:
 2. Find all branches in the current repo carrying that label.
 3. Walk upward through stored parents to find the stack root(s), stopping at the stack anchor, an untracked parent, or a trunk branch.
 4. Include all tracked descendants below those roots, even descendants without the selected label.
-5. Rebase in topological order: parents before children.
+5. Apply the selected strategy in topological order: parents before children.
 
 Per branch:
 
 1. Determine the current tip of the branch's sync parent.
-2. Optionally squash post-fork commits when `--squash` is passed.
-3. Run `git rebase --onto <parent-tip> <stored-fork-point>`.
+2. Optionally squash post-fork commits when `--squash` is passed (rebase only).
+3. With the default strategy, run `git rebase --onto <parent-tip> <stored-fork-point>`.
+   With `--strategy merge`, run `git merge --no-edit <parent-tip>`.
 4. If a conflict occurs:
-   - **Interactive mode** (when stdin is available and `--no-wait` is not set): keep Stackman paused while the user resolves with `git rebase --continue` or aborts with `git rebase --abort`.
+   - **Interactive mode** (when stdin is available and `--no-wait` is not set): keep Stackman paused while the user resolves with the selected operation's `--continue` or abort command.
    - **Non-interactive mode with resolver** (when `--resolver <cmd>` is provided or `STACKMAN_RESOLVER` is set): invoke the resolver command to automatically resolve the conflict.
    - **Non-interactive mode without resolver**: exit with an error directing the user to provide `--resolver <cmd>` or resolve manually.
-5. After a successful rebase, update `fork_point_sha` to the parent tip used for that rebase.
-6. Push with `--force-with-lease` when the branch has an upstream.
+5. After a successful operation, update `fork_point_sha` to the parent tip used for that operation.
+6. Push with `--force-with-lease` for rebase or a normal push for merge when the branch has an upstream.
 
 ### Hands-off sync with `--resolver`
 
@@ -168,18 +169,18 @@ STACKMAN_RESOLVER="path/to/stackman-resolve-conflicts" stackman sync
 
 The resolver command receives conflict context via environment variables:
 
-- `STACKMAN_BRANCH` — branch being rebased
+- `STACKMAN_BRANCH` — branch being updated
 - `STACKMAN_PARENT` — parent branch name
-- `STACKMAN_PARENT_TIP` — commit SHA of parent tip (rebase `--onto` target)
-- `STACKMAN_FORK_POINT` — commit SHA of fork-point (rebase upstream)
+- `STACKMAN_PARENT_TIP` — commit SHA of parent tip
+- `STACKMAN_FORK_POINT` — commit SHA of fork-point
 - `STACKMAN_CONFLICTED_FILES` — newline-separated list of files with conflicts
-- `STACKMAN_OPERATION` — operation type (currently "rebase")
+- `STACKMAN_OPERATION` — operation type ("rebase" or "merge")
 - `STACKMAN_REPO_URL` — remote origin URL (auto-discovered, optional)
 - `STACKMAN_PARENT_PR_NUMBER` — GitHub PR number for parent (auto-discovered via `gh`, optional)
 - `STACKMAN_PR_NUMBER` — GitHub PR number for branch (auto-discovered via `gh`, optional)
 
 The resolver must:
-1. Resolve conflicts (e.g., via an agent that runs `git add` and `git rebase --continue`)
+1. Resolve conflicts (e.g., via an agent that runs `git add` and the selected operation's `--continue` command)
 2. Exit 0 on success, nonzero on failure
 
 A reference resolver script is provided at `priv/skills/stackman-resolve-conflicts/stackman-resolve-conflicts`, which launches a headless agent with conflict-resolution instructions inlined.
@@ -192,7 +193,7 @@ Force non-interactive mode, bypassing TTY detection. Use this when stdin is avai
 stackman sync --resolver <cmd> --no-wait
 ```
 
-Before a non-dry-run sync, Stackman checks only worktrees involved in the sync set. Unrelated linked worktrees may be dirty. `--allow-dirty` skips this preflight and lets Git decide whether checkout/rebase can proceed; it is intentionally incompatible with `--squash`.
+Before a non-dry-run sync, Stackman checks only worktrees involved in the sync set. Unrelated linked worktrees may be dirty. `--allow-dirty` skips this preflight and lets Git decide whether checkout or the selected operation can proceed; it is intentionally incompatible with `--squash`.
 
 ## Done vs forget
 
