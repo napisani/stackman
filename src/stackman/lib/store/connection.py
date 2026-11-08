@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -11,7 +11,7 @@ def normalize_path(value: Path | str) -> str:
 
 
 @contextmanager
-def connect(db_path: Path | str) -> Iterator[sqlite3.Connection]:
+def connect(db_path: Path | str) -> Generator[sqlite3.Connection, None, None]:
     conn = sqlite3.connect(Path(db_path))
     conn.row_factory = sqlite3.Row
     try:
